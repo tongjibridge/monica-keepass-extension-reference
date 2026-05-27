@@ -1,4 +1,15 @@
-# Monica KeePass Browser Extension
+<h1 align="center">Monica KeePass Browser Extension</h1>
+
+<div align="center">
+
+[中文](README.zh-CN.md) | **English**
+
+<img src="public/icons/icon-128.png" alt="Monica KeePass icon" width="96" />
+
+<p><strong>Local-first KeePass vault for Chrome and Edge</strong></p>
+<p>Browser Extension · KeePass · Windows Hello · OneDrive Sync</p>
+
+</div>
 
 Monica KeePass is a local-first browser extension for working with KeePass `.kdbx`
 vaults in Chrome and Edge. It focuses on keeping the encrypted vault on the
@@ -69,6 +80,12 @@ browser extension do not share runtime storage, but the OneDrive KeePass sync
 flow follows the Android-side design: Graph file metadata is checked with ETag
 or cTag, local state keeps a base hash, and conflict cases avoid overwriting the
 remote vault blindly.
+
+## License
+
+This project is released under the GNU General Public License v3.0 only
+(`GPL-3.0-only`), matching the license used by the Monica Android reference
+project. See [LICENSE](LICENSE) for the full text.
 
 ## Acknowledgements
 
