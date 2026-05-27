@@ -1,0 +1,42 @@
+{
+  "name": "monica-keepass-extension",
+  "version": "0.1.0",
+  "description": "Monica KeePass browser extension: Windows Hello unlock, autofill, password generation, OneDrive backup",
+  "type": "module",
+  "scripts": {
+    "dev": "wxt",
+    "build": "wxt build",
+    "zip": "wxt zip",
+    "compile": "tsc --noEmit",
+    "test:smoke": "node scripts/smoke.mjs",
+    "test:harness": "esbuild scripts/harness.ts --bundle --platform=node --format=cjs --tsconfig=tsconfig.json --outfile=node_modules/.cache/harness.cjs && node node_modules/.cache/harness.cjs",
+    "postinstall": "wxt prepare"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "GPL-3.0",
+  "packageManager": "pnpm@10.32.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.42",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@wxt-dev/module-react": "^1.2.2",
+    "typescript": "^5.6.3",
+    "wxt": "^0.20.26"
+  },
+  "dependencies": {
+    "@mantine/core": "^9.2.1",
+    "@mantine/hooks": "^9.2.1",
+    "@tabler/icons-react": "^3.44.0",
+    "hash-wasm": "^4.12.0",
+    "kdbxweb": "^2.1.1",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "tldts": "^7.4.0"
+  }
+}

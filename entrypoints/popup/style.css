@@ -1,0 +1,11 @@
+/* Popup window sizing; everything else is handled by Mantine. */
+body {
+  margin: 0;
+  width: 380px;
+}
+
+#root {
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+}
