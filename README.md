@@ -71,6 +71,25 @@ initialize the local vault.
 pnpm run compile
 pnpm run test:harness
 pnpm run build
+pnpm run zip
+```
+
+## GitHub Actions Packaging
+
+The repository includes `.github/workflows/build-extension.yml`.
+
+- Every push to `main` and every pull request runs type-checking, harness tests,
+  and `pnpm run zip`.
+- The zipped extension is uploaded as a workflow artifact named
+  `monica-keepass-extension-chrome`.
+- Pushing a version tag such as `v0.1.0` also creates a GitHub Release and
+  attaches the generated `.zip`.
+
+To publish a release:
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
 ## Notes

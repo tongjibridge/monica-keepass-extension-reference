@@ -68,6 +68,25 @@ https://<extension-id>.chromiumapp.org/onedrive
 pnpm run compile
 pnpm run test:harness
 pnpm run build
+pnpm run zip
+```
+
+## GitHub Actions 自动打包
+
+仓库内置 `.github/workflows/build-extension.yml`。
+
+- 每次推送到 `main`、以及每个 pull request，都会自动运行类型检查、测试和
+  `pnpm run zip`。
+- 打包后的浏览器插件会作为 workflow artifact 上传，名称为
+  `monica-keepass-extension-chrome`。
+- 推送 `v0.1.0` 这类版本 tag 时，还会自动创建 GitHub Release，并把生成的
+  `.zip` 附加到 release。
+
+发布一个版本：
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
 ## 说明
