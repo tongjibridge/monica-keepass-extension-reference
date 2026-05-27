@@ -100,6 +100,16 @@ KeePass 同步流程参考了安卓端实现：通过 Graph 文件元数据中�
 本项目使用 GNU General Public License v3.0 only（`GPL-3.0-only`），与 Monica
 安卓参考项目保持一致。完整文本见 [LICENSE](LICENSE)。
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=tongjibridge%2Fmonica-keepass-extension-reference&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=tongjibridge/monica-keepass-extension-reference&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=tongjibridge/monica-keepass-extension-reference&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=tongjibridge/monica-keepass-extension-reference&type=date&legend=top-left" />
+ </picture>
+</a>
+
 ## 致谢
 
 感谢 Monica 安卓项目提供参考实现与产品方向：
