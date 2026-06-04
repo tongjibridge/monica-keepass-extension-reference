@@ -7,6 +7,29 @@ import type {
   VaultMeta,
 } from '@/src/vault/types';
 import type { OneDriveConfig, OneDriveFileStat, OneDriveListItem } from '@/src/onedrive/graph';
+import type { CredentialSnapshot, PendingSuggestion } from '@/src/autofill/suggest';
+
+export type { CredentialSnapshot, PendingSuggestion } from '@/src/autofill/suggest';
+
+/**
+ * Backup credential as sent over chrome.runtime messaging. Binary key file
+ * travels as base64 because the messaging boundary serializes with JSON.
+ */
+export interface BackupCredentialInput {
+  password?: string;
+  keyFileB64?: string;
+}
+
+export interface BackupExportLocalResult {
+  data: string; // base64 of the encrypted bundle bytes
+  suggestedName: string;
+}
+
+export interface BackupOneDriveResult {
+  message: string;
+  path: string;
+  stat: OneDriveFileStat | null;
+}
 
 // chrome.runtime messaging serializes with JSON, so binary payloads travel as
 // base64 strings rather than ArrayBuffers.
@@ -52,6 +75,13 @@ export type BgRequest =
   | { type: 'vault.delete'; id: string }
   | { type: 'vault.match'; url: string }
   | { type: 'vault.export' }
+  | { type: 'vault.capture'; snapshot: CredentialSnapshot }
+  | { type: 'vault.applyPending'; entryId?: string }
+  | { type: 'vault.dismissPending' }
+  | { type: 'backup.exportLocal'; credential: BackupCredentialInput }
+  | { type: 'backup.exportToOneDrive'; credential: BackupCredentialInput; path?: string }
+  | { type: 'backup.importLocal'; data: string; credential: BackupCredentialInput }
+  | { type: 'backup.importFromOneDrive'; path: string; credential: BackupCredentialInput }
   | { type: 'onedrive.status' }
   | { type: 'onedrive.configure'; clientId: string; remotePath: string }
   | { type: 'onedrive.connect' }
@@ -67,6 +97,7 @@ export interface VaultStatus {
   helloEnrolled: boolean;
   rememberedKeyFile: boolean;
   meta: VaultMeta | null;
+  pending: PendingSuggestion | null;
 }
 
 export interface OneDriveSyncState {
@@ -118,6 +149,13 @@ export interface BgResultMap {
   'vault.delete': null;
   'vault.match': EntrySummary[];
   'vault.export': string;
+  'vault.capture': null;
+  'vault.applyPending': VaultStatus;
+  'vault.dismissPending': VaultStatus;
+  'backup.exportLocal': BackupExportLocalResult;
+  'backup.exportToOneDrive': BackupOneDriveResult;
+  'backup.importLocal': VaultStatus;
+  'backup.importFromOneDrive': VaultStatus;
   'onedrive.status': OneDriveStatus;
   'onedrive.configure': OneDriveStatus;
   'onedrive.connect': OneDriveSyncResult;

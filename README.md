@@ -106,15 +106,9 @@ This project is released under the GNU General Public License v3.0 only
 (`GPL-3.0-only`), matching the license used by the Monica Android reference
 project. See [LICENSE](LICENSE) for the full text.
 
-## Star History
 
-<a href="https://www.star-history.com/?repos=tongjibridge%2Fmonica-keepass-extension-reference&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=tongjibridge/monica-keepass-extension-reference&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=tongjibridge/monica-keepass-extension-reference&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=tongjibridge/monica-keepass-extension-reference&type=date&legend=top-left" />
- </picture>
-</a>
+## Repository Statistics
+![Alt](https://repobeats.axiom.co/api/embed/4ca5ca412c6b1333c26aecf7b0669fd9a47064fd.svg "Repobeats analytics image")
 
 ## Acknowledgements
 

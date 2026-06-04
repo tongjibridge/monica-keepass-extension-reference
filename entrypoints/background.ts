@@ -1,4 +1,9 @@
 import {
+  base64ToBytes,
+  bytesToBase64,
+  type BackupCredentialInput,
+  type BackupExportLocalResult,
+  type BackupOneDriveResult,
   type BgRequest,
   type CredentialInput,
   type OffscreenOp,
@@ -7,8 +12,20 @@ import {
   type OneDriveSyncState,
   type VaultStatus,
 } from '@/src/messaging/protocol';
+import {
+  backupFilenameFor,
+  exportBackup,
+  importBackup,
+  type BackupCredential,
+} from '@/src/backup/codec';
 import { matchEntriesForUrl } from '@/src/autofill/match';
-import type { EntrySummary, VaultMeta } from '@/src/vault/types';
+import {
+  decideSuggestion,
+  type CredentialSnapshot,
+  type EnrichedEntry,
+  type PendingSuggestion,
+} from '@/src/autofill/suggest';
+import type { EntryDetail, EntrySummary, VaultMeta } from '@/src/vault/types';
 import {
   conflictPath,
   DEFAULT_ONEDRIVE_CLIENT_ID,
@@ -33,8 +50,21 @@ const HELLO_KEY = 'hello.enrollment';
 const ONEDRIVE_CONFIG_KEY = 'onedrive.config';
 const ONEDRIVE_TOKEN_KEY = 'onedrive.token';
 const ONEDRIVE_SYNC_KEY = 'onedrive.sync';
+const PENDING_KEY = 'autofill.pending';
+const PENDING_NOTIFICATION_ID = 'monica.pending';
 const AUTO_LOCK_ALARM = 'autolock';
 const AUTO_LOCK_MINUTES = 15;
+
+// Storage keys included in a backup envelope. Device-specific items (Hello
+// enrollment, OneDrive refresh token, ephemeral pending suggestions) are
+// deliberately omitted so backups remain portable across machines.
+const BACKUP_INCLUDED_KEYS = [
+  FILE_KEY,
+  KEYFILE_KEY,
+  ONEDRIVE_CONFIG_KEY,
+  ONEDRIVE_SYNC_KEY,
+] as const;
+const BACKUP_DEVICE_KEYS_TO_CLEAR = [HELLO_KEY, ONEDRIVE_TOKEN_KEY];
 
 interface StoredFile {
   name: string;
@@ -155,6 +185,32 @@ async function route(req: BgRequest): Promise<unknown> {
     case 'vault.export':
       return callOffscreen({ op: 'save' });
 
+    case 'vault.capture':
+      await handleCapture(req.snapshot);
+      return null;
+
+    case 'vault.applyPending':
+      await applyPending(req.entryId);
+      return getStatus();
+
+    case 'vault.dismissPending':
+      await setPending(null);
+      return getStatus();
+
+    case 'backup.exportLocal':
+      return backupExportLocal(req.credential);
+
+    case 'backup.exportToOneDrive':
+      return backupExportToOneDrive(req.credential, req.path);
+
+    case 'backup.importLocal':
+      await backupApplyImport(base64ToBytes(req.data), req.credential);
+      return getStatus();
+
+    case 'backup.importFromOneDrive':
+      await backupImportFromOneDrive(req.path, req.credential);
+      return getStatus();
+
     case 'onedrive.status':
       return getOneDriveStatus();
 
@@ -194,6 +250,7 @@ async function getStatus(): Promise<VaultStatus> {
   const file = await loadFile();
   const helloEnrolled = (await chrome.storage.local.get(HELLO_KEY))[HELLO_KEY] != null;
   const rememberedKeyFile = (await loadRememberedKeyFile()) != null;
+  const pending = await loadPending();
   let unlocked = false;
   let meta: VaultMeta | null = null;
   if (await hasOffscreen()) {
@@ -201,7 +258,112 @@ async function getStatus(): Promise<VaultStatus> {
     unlocked = status.unlocked;
     if (unlocked) meta = (await callOffscreen({ op: 'meta' })) as VaultMeta;
   }
-  return { unlocked, hasVault: file != null, helloEnrolled, rememberedKeyFile, meta };
+  return { unlocked, hasVault: file != null, helloEnrolled, rememberedKeyFile, meta, pending };
+}
+
+async function handleCapture(snapshot: CredentialSnapshot): Promise<void> {
+  if (!snapshot?.password) return;
+  // Cannot decide save vs update without entries; drop while locked.
+  if (!(await hasOffscreen())) return;
+  const offscreenStatus = (await callOffscreen({ op: 'status' })) as { unlocked: boolean };
+  if (!offscreenStatus.unlocked) return;
+
+  const entries = (await callOffscreen({ op: 'listEntries' })) as EntrySummary[];
+  const urlMatched = matchEntriesForUrl(entries, snapshot.url);
+  const usernameKey = snapshot.username.trim().toLowerCase();
+  const enriched: EnrichedEntry[] = await Promise.all(
+    urlMatched.map(async (entry) => {
+      if (entry.username.trim().toLowerCase() !== usernameKey) return entry;
+      const detail = (await callOffscreen({
+        op: 'getEntry',
+        id: entry.id,
+        reveal: true,
+      })) as EntryDetail;
+      return { ...entry, password: detail.password };
+    }),
+  );
+
+  const suggestion = decideSuggestion(enriched, snapshot);
+  if (!suggestion) return;
+  await setPending(suggestion);
+}
+
+async function applyPending(overrideEntryId?: string): Promise<void> {
+  const pending = await loadPending();
+  if (!pending) throw new Error('No pending credential to save');
+
+  if (!(await hasOffscreen())) throw new Error('Unlock the vault first');
+  const offscreenStatus = (await callOffscreen({ op: 'status' })) as { unlocked: boolean };
+  if (!offscreenStatus.unlocked) throw new Error('Unlock the vault first');
+
+  if (pending.action === 'save') {
+    await callOffscreen({
+      op: 'add',
+      input: {
+        title: pending.origin || pending.url,
+        username: pending.username,
+        password: pending.newPassword,
+        url: pending.url,
+        notes: '',
+      },
+    });
+  } else {
+    const entryId = overrideEntryId ?? pending.entryId;
+    if (!entryId) throw new Error('No target entry to update');
+    await callOffscreen({
+      op: 'update',
+      input: { id: entryId, password: pending.newPassword },
+    });
+  }
+  await persist();
+  await setPending(null);
+  armAutoLock();
+}
+
+async function loadPending(): Promise<PendingSuggestion | null> {
+  const stored = await chrome.storage.session.get(PENDING_KEY);
+  return (stored[PENDING_KEY] as PendingSuggestion | undefined) ?? null;
+}
+
+async function setPending(suggestion: PendingSuggestion | null): Promise<void> {
+  if (suggestion) {
+    await chrome.storage.session.set({ [PENDING_KEY]: suggestion });
+    await safeSetBadge('1', '#2563eb');
+    notifyPending(suggestion);
+  } else {
+    await chrome.storage.session.remove(PENDING_KEY);
+    await safeSetBadge('', '#000000');
+    chrome.notifications?.clear?.(PENDING_NOTIFICATION_ID).catch(() => {});
+  }
+}
+
+async function safeSetBadge(text: string, color: string): Promise<void> {
+  try {
+    await chrome.action.setBadgeText({ text });
+    if (text) await chrome.action.setBadgeBackgroundColor({ color });
+  } catch {
+    // chrome.action may not exist in test contexts; ignore.
+  }
+}
+
+function notifyPending(suggestion: PendingSuggestion): void {
+  if (!chrome.notifications?.create) return;
+  const title =
+    suggestion.action === 'save' ? 'Save credentials?' : 'Update saved password?';
+  const account = suggestion.username || 'this account';
+  const message =
+    suggestion.action === 'save'
+      ? `Save ${account} on ${suggestion.origin} into Monica KeePass.`
+      : `Update the stored password for ${suggestion.entryTitle || account} on ${suggestion.origin}.`;
+  chrome.notifications
+    .create(PENDING_NOTIFICATION_ID, {
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
+      title,
+      message,
+      priority: 0,
+    })
+    .catch(() => {});
 }
 
 async function loadFile(): Promise<StoredFile | null> {
@@ -526,6 +688,112 @@ async function callOffscreen(payload: OffscreenOp): Promise<unknown> {
     throw new Error(res && !res.ok ? res.error : 'Offscreen call failed');
   }
   return res.value;
+}
+
+function toBackupCredential(input: BackupCredentialInput): BackupCredential {
+  return {
+    password: input.password || undefined,
+    keyFile: input.keyFileB64 ? base64ToBytes(input.keyFileB64) : undefined,
+  };
+}
+
+async function gatherBackupStorage(): Promise<Record<string, unknown>> {
+  const stored = await chrome.storage.local.get([...BACKUP_INCLUDED_KEYS]);
+  const out: Record<string, unknown> = {};
+  for (const key of BACKUP_INCLUDED_KEYS) {
+    if (stored[key] !== undefined) out[key] = stored[key];
+  }
+  return out;
+}
+
+function extensionVersion(): string {
+  try {
+    return chrome.runtime.getManifest().version ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function backupDefaultRemotePath(vaultRemotePath: string): string {
+  const idx = vaultRemotePath.lastIndexOf('/');
+  const dir = idx > 0 ? vaultRemotePath.slice(0, idx) : '';
+  const combined = `${dir}/${backupFilenameFor()}`;
+  return normalizeRemotePath(combined);
+}
+
+async function backupExportLocal(
+  credentialInput: BackupCredentialInput,
+): Promise<BackupExportLocalResult> {
+  const storage = await gatherBackupStorage();
+  if (!storage[FILE_KEY]) throw new Error('No vault to back up');
+  const bytes = await exportBackup(storage, toBackupCredential(credentialInput), extensionVersion());
+  return { data: bytesToBase64(bytes), suggestedName: backupFilenameFor() };
+}
+
+async function backupExportToOneDrive(
+  credentialInput: BackupCredentialInput,
+  path?: string,
+): Promise<BackupOneDriveResult> {
+  const config = await loadOneDriveClientConfig();
+  const token = await getOneDriveAccessToken(config);
+  const storage = await gatherBackupStorage();
+  if (!storage[FILE_KEY]) throw new Error('No vault to back up');
+  const bytes = await exportBackup(storage, toBackupCredential(credentialInput), extensionVersion());
+
+  const targetPath =
+    (path && path.trim() ? normalizeRemotePath(path) : '') ||
+    backupDefaultRemotePath(config.remotePath || '/');
+  const stat = await writeRemote(token, targetPath, bytesToBase64(bytes), null);
+  return { message: 'Uploaded backup to OneDrive.', path: targetPath, stat };
+}
+
+async function backupImportFromOneDrive(
+  path: string,
+  credentialInput: BackupCredentialInput,
+): Promise<void> {
+  if (!path || !path.trim()) throw new Error('OneDrive path is required');
+  const config = await loadOneDriveClientConfig();
+  const token = await getOneDriveAccessToken(config);
+  const dataB64 = await readRemote(token, normalizeRemotePath(path));
+  await backupApplyImport(base64ToBytes(dataB64), credentialInput);
+}
+
+async function backupApplyImport(
+  bytes: Uint8Array,
+  credentialInput: BackupCredentialInput,
+): Promise<void> {
+  // Decrypt before touching any local state — wrong credential must be a no-op.
+  const payload = await importBackup(bytes, toBackupCredential(credentialInput));
+  if (!payload.storage || typeof payload.storage !== 'object') {
+    throw new Error('Backup is missing storage data');
+  }
+  if (!payload.storage[FILE_KEY]) {
+    throw new Error('Backup does not contain a vault file');
+  }
+
+  // Lock the current vault and stop any pending autolock.
+  await callOffscreen({ op: 'lock' }).catch(() => {});
+  try {
+    await chrome.alarms.clear(AUTO_LOCK_ALARM);
+  } catch {}
+
+  // Replace backup-relevant keys atomically: clear then write.
+  await chrome.storage.local.remove([
+    ...BACKUP_INCLUDED_KEYS,
+    ...BACKUP_DEVICE_KEYS_TO_CLEAR,
+  ]);
+
+  // Restrict the write to the allowlist so a tampered backup can't sneak in
+  // unexpected storage keys.
+  const allowed: Record<string, unknown> = {};
+  for (const key of BACKUP_INCLUDED_KEYS) {
+    if (payload.storage[key] !== undefined) allowed[key] = payload.storage[key];
+  }
+  await chrome.storage.local.set(allowed);
+
+  // Drop ephemeral state too.
+  await chrome.storage.session.remove(PENDING_KEY);
+  await safeSetBadge('', '#000000');
 }
 
 function errorMessage(err: unknown): string {

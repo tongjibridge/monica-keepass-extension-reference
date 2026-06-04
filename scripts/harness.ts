@@ -7,6 +7,12 @@ import {
   estimateEntropyBits,
   generatePassword,
 } from '@/src/crypto/generator';
+import {
+  decideSuggestion,
+  type CredentialSnapshot,
+  type EnrichedEntry,
+} from '@/src/autofill/suggest';
+import { backupFilenameFor, exportBackup, importBackup } from '@/src/backup/codec';
 
 let passed = 0;
 function assert(cond: boolean, msg: string) {
@@ -112,7 +118,168 @@ async function main() {
   assert(many.size === 100, '100 generated passwords are unique');
   assert(estimateEntropyBits({ ...DEFAULT_PASSWORD_OPTIONS, length: 20 }) > 100, 'entropy estimate sane');
 
+  // --- save/update decision (suggest.ts) ---
+  const mkEntry = (
+    overrides: Partial<EnrichedEntry> & Pick<EnrichedEntry, 'id' | 'username'>,
+  ): EnrichedEntry => ({
+    title: overrides.title ?? '',
+    url: overrides.url ?? '',
+    groupId: '',
+    hasPassword: true,
+    hasTotp: false,
+    ...overrides,
+  });
+
+  const submitFor = (
+    username: string,
+    password: string,
+    overrides: Partial<CredentialSnapshot> = {},
+  ): CredentialSnapshot => ({
+    url: 'https://example.com/login',
+    username,
+    password,
+    kind: 'submit',
+    ...overrides,
+  });
+
+  const sugSave = decideSuggestion(
+    [mkEntry({ id: 'other', username: 'bob', password: 'pw' })],
+    submitFor('alice', 'newpw'),
+  );
+  assert(sugSave?.action === 'save' && sugSave.newPassword === 'newpw', 'no user match → save');
+
+  const sugSilent = decideSuggestion(
+    [mkEntry({ id: 'a', username: 'Alice', password: 'same' })],
+    submitFor('alice', 'same'),
+  );
+  assert(sugSilent === null, 'same username + same password → silent');
+
+  const sugUpdate = decideSuggestion(
+    [mkEntry({ id: 'a', username: 'alice', password: 'old' })],
+    submitFor('alice', 'new'),
+  );
+  assert(
+    sugUpdate?.action === 'update' && sugUpdate.entryId === 'a' && sugUpdate.newPassword === 'new',
+    'same username + different password → update',
+  );
+
+  const sugChange = decideSuggestion(
+    [
+      mkEntry({ id: 'a', username: 'alice', password: 'wrongOld' }),
+      mkEntry({ id: 'b', username: 'alice', password: 'rightOld' }),
+    ],
+    submitFor('alice', 'shinyNew', { kind: 'change-form', oldPassword: 'rightOld' }),
+  );
+  assert(
+    sugChange?.action === 'update' && sugChange.entryId === 'b',
+    'change-form picks entry matching oldPassword',
+  );
+
+  const sugChangeFallback = decideSuggestion(
+    [
+      mkEntry({ id: 'a', username: 'alice', password: 'nope' }),
+      mkEntry({ id: 'b', username: 'alice', password: 'alsoNope' }),
+    ],
+    submitFor('alice', 'shinyNew', { kind: 'change-form', oldPassword: 'mystery' }),
+  );
+  assert(
+    sugChangeFallback?.action === 'update' && sugChangeFallback.entryId === 'a',
+    'change-form with no oldPassword match falls back to primary',
+  );
+
+  // --- backup codec ---
+  const samplePayload = {
+    'vault.file': { name: 'vault.kdbx', data: 'BASE64KDBXBYTES' },
+    'vault.keyfile': 'BASE64KEYFILEBYTES',
+    'onedrive.config': { clientId: 'client-x', remotePath: '/Apps/Vault/x.kdbx' },
+    'onedrive.sync': { baseHash: 'abc', workingHash: 'abc' },
+  };
+
+  const exportedPw = await exportBackup(samplePayload, { password: '我的备份-密码🔐' }, '0.1.0');
+  const importedPw = await importBackup(exportedPw, { password: '我的备份-密码🔐' });
+  assert(
+    JSON.stringify(importedPw.storage) === JSON.stringify(samplePayload),
+    'backup round-trips with password only',
+  );
+
+  const keyFile = new Uint8Array(64);
+  crypto.getRandomValues(keyFile);
+  const exportedKf = await exportBackup(samplePayload, { keyFile }, '0.1.0');
+  const importedKf = await importBackup(exportedKf, { keyFile });
+  assert(
+    JSON.stringify(importedKf.storage) === JSON.stringify(samplePayload),
+    'backup round-trips with key file only',
+  );
+
+  const exportedBoth = await exportBackup(samplePayload, { password: 'pw', keyFile }, '0.1.0');
+  const importedBoth = await importBackup(exportedBoth, { password: 'pw', keyFile });
+  assert(
+    JSON.stringify(importedBoth.storage) === JSON.stringify(samplePayload),
+    'backup round-trips with password + key file',
+  );
+
+  await rejects(
+    () => importBackup(exportedPw, { password: 'wrong' }),
+    'wrong backup password is rejected',
+  );
+
+  const otherKeyFile = new Uint8Array(64);
+  crypto.getRandomValues(otherKeyFile);
+  await rejects(
+    () => importBackup(exportedKf, { keyFile: otherKeyFile }),
+    'wrong key file is rejected',
+  );
+
+  await rejects(
+    () => importBackup(exportedBoth, { password: 'pw' }),
+    'partial credential (missing key file) is rejected',
+  );
+
+  // Tampered ciphertext: flip one byte inside the envelope's ciphertextB64 field.
+  const envelopeText = new TextDecoder().decode(exportedPw);
+  const envelope = JSON.parse(envelopeText);
+  const ct = atob(envelope.ciphertextB64);
+  const tampered = ct.slice(0, 10) + String.fromCharCode((ct.charCodeAt(10) ^ 0x01) & 0xff) + ct.slice(11);
+  envelope.ciphertextB64 = btoa(tampered);
+  await rejects(
+    () => importBackup(new TextEncoder().encode(JSON.stringify(envelope)), { password: '我的备份-密码🔐' }),
+    'tampered ciphertext is rejected by GCM tag',
+  );
+
+  await rejects(
+    () => importBackup(new TextEncoder().encode('{"format":"other","version":1}'), { password: 'x' }),
+    'foreign format is rejected',
+  );
+
+  await rejects(
+    () =>
+      importBackup(
+        new TextEncoder().encode('{"format":"monica-keepass-backup","version":99}'),
+        { password: 'x' },
+      ),
+    'unknown version is rejected',
+  );
+
+  await rejects(
+    () => exportBackup(samplePayload, {}, '0.1.0'),
+    'exportBackup with no credential throws',
+  );
+
+  assert(/^monica-keepass-backup-\d{8}-\d{6}\.mkbackup$/.test(backupFilenameFor(new Date(2026, 4, 27, 18, 0, 0))), 'filename has timestamp');
+
   console.log(`\nALL ${passed} HARNESS CHECKS PASSED`);
+}
+
+async function rejects(fn: () => Promise<unknown>, msg: string): Promise<void> {
+  let threw = false;
+  try {
+    await fn();
+  } catch {
+    threw = true;
+  }
+  if (!threw) throw new Error('FAILED: ' + msg + ' (did not throw)');
+  passed++;
+  console.log('  ok:', msg);
 }
 
 main().catch((e) => {

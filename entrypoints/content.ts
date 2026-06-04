@@ -1,4 +1,4 @@
-import { callBackground } from '@/src/messaging/protocol';
+import { callBackground, type CredentialSnapshot } from '@/src/messaging/protocol';
 import { DEFAULT_PASSWORD_OPTIONS, generatePassword } from '@/src/crypto/generator';
 import type { EntrySummary } from '@/src/vault/types';
 
@@ -7,6 +7,7 @@ export default defineContentScript({
   runAt: 'document_idle',
   main() {
     new Autofiller().init();
+    new CredentialCapture().init();
   },
 });
 
@@ -322,6 +323,152 @@ class Autofiller {
     this.controls = null;
     this.controlField = null;
   }
+}
+
+type PasswordRole = 'current' | 'new' | 'confirm' | 'unknown';
+
+class CredentialCapture {
+  // Only password fields the user actually typed into qualify. Browser autofill
+  // and our own setNativeValue dispatch non-trusted input events, so we can
+  // safely use isTrusted to ignore them.
+  private userTypedPasswords = new WeakSet<HTMLInputElement>();
+  // Per-session dedupe to avoid double-firing for the same submission.
+  private lastSent = '';
+
+  init() {
+    document.addEventListener('input', this.onInput, true);
+    document.addEventListener('submit', this.onSubmit, true);
+    document.addEventListener('click', this.onClick, true);
+  }
+
+  private onInput = (e: Event) => {
+    const t = e.target;
+    if (!(t instanceof HTMLInputElement)) return;
+    if (t.type !== 'password') return;
+    if (!(e as InputEvent).isTrusted) return;
+    if (!t.value) return;
+    this.userTypedPasswords.add(t);
+  };
+
+  private onSubmit = (e: SubmitEvent) => {
+    const form = e.target;
+    if (form instanceof HTMLFormElement) this.captureFromContext(form);
+  };
+
+  private onClick = (e: MouseEvent) => {
+    const target = e.target;
+    if (!(target instanceof Element) || !target.isConnected) return;
+    const button = target.closest<HTMLButtonElement | HTMLInputElement>(
+      'button, [role=button], input[type=submit], input[type=button]',
+    );
+    if (!button) return;
+
+    const form = button.closest('form');
+    if (form && (button as HTMLButtonElement | HTMLInputElement).type === 'submit') {
+      // The form submit listener will run; nothing to do here.
+      return;
+    }
+
+    const ctx = form ?? document;
+    const passwords = collectPasswordFields(ctx);
+    if (passwords.length === 0) return;
+    if (!passwords.some((p) => this.userTypedPasswords.has(p))) return;
+    this.captureFromContext(ctx);
+  };
+
+  private captureFromContext(ctx: HTMLFormElement | Document) {
+    const passwords = collectPasswordFields(ctx);
+    if (passwords.length === 0) return;
+    if (!passwords.some((p) => this.userTypedPasswords.has(p))) return;
+
+    const roles = passwords.map(roleOfPasswordField);
+    const newIdx = roles.findIndex((r) => r === 'new');
+    const currentIdx = roles.findIndex((r) => r === 'current');
+
+    let kind: CredentialSnapshot['kind'] = 'submit';
+    let password = '';
+    let oldPassword: string | undefined;
+
+    if (newIdx !== -1 && currentIdx !== -1) {
+      kind = 'change-form';
+      password = passwords[newIdx]!.value;
+      oldPassword = passwords[currentIdx]!.value || undefined;
+    } else if (passwords.length >= 3 && newIdx !== -1) {
+      kind = 'change-form';
+      password = passwords[newIdx]!.value;
+      const previous = passwords.find((p, i) => i !== newIdx && roles[i] !== 'confirm');
+      oldPassword = previous?.value || undefined;
+    } else if (passwords.length === 2 && newIdx === -1 && currentIdx === -1) {
+      const [first, second] = passwords as [HTMLInputElement, HTMLInputElement];
+      if (first.value && first.value === second.value) {
+        password = first.value;
+      } else if (first.value && second.value) {
+        kind = 'change-form';
+        oldPassword = first.value;
+        password = second.value;
+      }
+    } else {
+      const target =
+        passwords.find((p) => this.userTypedPasswords.has(p) && p.value) ??
+        passwords.find((p) => p.value);
+      password = target?.value ?? '';
+    }
+
+    if (!password) return;
+
+    const anchor = newIdx !== -1 ? passwords[newIdx]! : passwords[0]!;
+    const username = pickUsernameField(ctx, anchor)?.value.trim() ?? '';
+
+    const snapshot: CredentialSnapshot = {
+      url: location.href,
+      username,
+      password,
+      kind,
+      ...(oldPassword ? { oldPassword } : {}),
+    };
+
+    const dedupe = `${snapshot.kind}|${snapshot.username}|${snapshot.password}|${snapshot.oldPassword ?? ''}`;
+    if (dedupe === this.lastSent) return;
+    this.lastSent = dedupe;
+    void callBackground({ type: 'vault.capture', snapshot }).catch(() => {});
+  }
+}
+
+function collectPasswordFields(ctx: HTMLFormElement | Document): HTMLInputElement[] {
+  return Array.from(ctx.querySelectorAll<HTMLInputElement>('input[type=password]'))
+    .filter((p) => !p.disabled && !p.readOnly && p.value.length > 0);
+}
+
+function roleOfPasswordField(input: HTMLInputElement): PasswordRole {
+  const autocomplete = (input.autocomplete || '').toLowerCase();
+  if (autocomplete.includes('current-password')) return 'current';
+  if (autocomplete.includes('new-password')) return 'new';
+  const hint = [
+    input.name,
+    input.id,
+    input.placeholder,
+    input.getAttribute('aria-label') ?? '',
+  ]
+    .join(' ')
+    .toLowerCase();
+  if (/(confirm|verify|repeat|again|retype)/.test(hint)) return 'confirm';
+  if (/(old|current|original|existing|prev)/.test(hint)) return 'current';
+  if (/new/.test(hint)) return 'new';
+  return 'unknown';
+}
+
+function pickUsernameField(
+  ctx: HTMLFormElement | Document,
+  anchor: HTMLInputElement,
+): HTMLInputElement | null {
+  const candidates = Array.from(
+    ctx.querySelectorAll<HTMLInputElement>(USERNAME_SELECTOR),
+  ).filter((input) => !input.disabled && !input.readOnly && input.value.trim().length > 0);
+  if (candidates.length === 0) return null;
+  const before = candidates.filter(
+    (c) => c.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING,
+  );
+  return before.length > 0 ? before[before.length - 1]! : candidates[0]!;
 }
 
 function filterEntries(entries: EntrySummary[], query: string): EntrySummary[] {

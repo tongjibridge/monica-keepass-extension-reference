@@ -44,6 +44,7 @@ import {
   IconWand,
 } from '@tabler/icons-react';
 import {
+  base64ToBytes,
   bytesToBase64,
   callBackground,
   type CredentialInput,
@@ -55,7 +56,16 @@ import type { EntryDetail, EntrySummary, NewEntryInput } from '@/src/vault/types
 import { clearHello, enrollHello, isHelloAvailable, unlockWithHello } from '@/src/hello/webauthn';
 import { Generator } from './Generator';
 
-type View = 'loading' | 'setup' | 'locked' | 'list' | 'detail' | 'form' | 'generator' | 'settings';
+type View =
+  | 'loading'
+  | 'setup'
+  | 'locked'
+  | 'list'
+  | 'detail'
+  | 'form'
+  | 'generator'
+  | 'settings'
+  | 'backup';
 
 function describeError(e: unknown): string {
   if (e instanceof DOMException) return `${e.name}: ${e.message || 'WebAuthn request failed'}`;
@@ -156,6 +166,26 @@ export function App() {
             <Alert color="red" mb="md" variant="light" onClose={() => setError('')} withCloseButton>
               {error}
             </Alert>
+          )}
+
+          {status?.pending && (
+            <PendingBanner
+              status={status}
+              busy={busy}
+              onApply={(entryId) =>
+                run(async () => {
+                  await callBackground({ type: 'vault.applyPending', ...(entryId ? { entryId } : {}) });
+                  await refreshStatus();
+                  if (view === 'list') await loadEntries();
+                })
+              }
+              onDismiss={() =>
+                run(async () => {
+                  await callBackground({ type: 'vault.dismissPending' });
+                  await refreshStatus();
+                })
+              }
+            />
           )}
 
           {view === 'loading' && (
@@ -293,6 +323,22 @@ export function App() {
               credential={credential}
               onChanged={refreshStatus}
               onBack={() => setView('list')}
+              onOpenBackup={() => setView('backup')}
+              setError={setError}
+            />
+          )}
+
+          {view === 'backup' && status && (
+            <BackupView
+              status={status}
+              onBack={() => setView('settings')}
+              onAfterImport={async () => {
+                setCredential(null);
+                setEntries([]);
+                setSelected(null);
+                const s = await refreshStatus();
+                setView(s.unlocked ? 'list' : 'locked');
+              }}
               setError={setError}
             />
           )}
@@ -662,12 +708,14 @@ function SettingsView({
   credential,
   onChanged,
   onBack,
+  onOpenBackup,
   setError,
 }: {
   status: VaultStatus;
   credential: CredentialInput | null;
   onChanged: () => Promise<VaultStatus>;
   onBack: () => void;
+  onOpenBackup: () => void;
   setError: (e: string) => void;
 }) {
   const [available, setAvailable] = useState<boolean | null>(null);
@@ -877,6 +925,25 @@ function SettingsView({
       <Divider />
 
       <div>
+        <Text size="sm" fw={600} mb={6}>
+          Backup &amp; Restore
+        </Text>
+        <Text size="xs" c="dimmed" mb={6}>
+          Pack all extension data into a single encrypted file for migration to
+          another device.
+        </Text>
+        <Button
+          variant="light"
+          leftSection={<IconDownload size={16} />}
+          onClick={onOpenBackup}
+        >
+          Open backup &amp; restore
+        </Button>
+      </div>
+
+      <Divider />
+
+      <div>
         <Group gap={6} mb={6}>
           <IconCloud size={18} />
           <Text size="sm" fw={600}>
@@ -1024,6 +1091,316 @@ function SettingsView({
           </Group>
         </Stack>
       </div>
+    </Stack>
+  );
+}
+
+function PendingBanner({
+  status,
+  busy,
+  onApply,
+  onDismiss,
+}: {
+  status: VaultStatus;
+  busy: boolean;
+  onApply: (entryId?: string) => void;
+  onDismiss: () => void;
+}) {
+  const pending = status.pending;
+  if (!pending) return null;
+
+  const isSave = pending.action === 'save';
+  const title = isSave ? 'Save credentials?' : 'Update saved password?';
+  const account = pending.username || '(no username)';
+  const description = isSave
+    ? `Save ${account} on ${pending.origin} into Monica KeePass.`
+    : `Replace the password for "${pending.entryTitle || account}" on ${pending.origin}.`;
+
+  return (
+    <Alert color="indigo" mb="md" variant="light" title={title} icon={<IconKey size={16} />}>
+      <Text size="sm" mb="sm">
+        {description}
+      </Text>
+      {!status.unlocked && (
+        <Text size="xs" c="dimmed" mb="sm">
+          Unlock the vault to save.
+        </Text>
+      )}
+      <Group gap="xs">
+        <Button
+          size="xs"
+          disabled={busy || !status.unlocked}
+          onClick={() => onApply()}
+        >
+          {isSave ? 'Save' : 'Update'}
+        </Button>
+        <Button size="xs" variant="default" disabled={busy} onClick={onDismiss}>
+          Dismiss
+        </Button>
+      </Group>
+    </Alert>
+  );
+}
+
+function BackupView({
+  status,
+  onBack,
+  onAfterImport,
+  setError,
+}: {
+  status: VaultStatus;
+  onBack: () => void;
+  onAfterImport: () => Promise<void>;
+  setError: (e: string) => void;
+}) {
+  const [direction, setDirection] = useState<'export' | 'import'>('export');
+  const [destination, setDestination] = useState<'local' | 'onedrive'>('local');
+  const [password, setPassword] = useState('');
+  const [keyFileB64, setKeyFileB64] = useState<string | null>(null);
+  const [importFileB64, setImportFileB64] = useState<string | null>(null);
+  const [oneDrivePath, setOneDrivePath] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [confirmImport, setConfirmImport] = useState(false);
+
+  useEffect(() => {
+    setConfirmImport(false);
+    setMessage('');
+  }, [direction, destination]);
+
+  const pickKeyFile = async (file: File | null) => {
+    if (!file) {
+      setKeyFileB64(null);
+      return;
+    }
+    setKeyFileB64(bytesToBase64(await file.arrayBuffer()));
+  };
+
+  const pickImportFile = async (file: File | null) => {
+    if (!file) {
+      setImportFileB64(null);
+      return;
+    }
+    setImportFileB64(bytesToBase64(await file.arrayBuffer()));
+  };
+
+  const triggerDownload = (b64: string, filename: string) => {
+    const bytes = base64ToBytes(b64);
+    const blob = new Blob([bytes as BlobPart], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const credentialPayload = () => ({
+    ...(password ? { password } : {}),
+    ...(keyFileB64 ? { keyFileB64 } : {}),
+  });
+
+  const hasCred = Boolean(password || keyFileB64);
+  const cannotExport = !status.hasVault;
+
+  const run = async (fn: () => Promise<string>) => {
+    if (busy) return;
+    setBusy(true);
+    setMessage('');
+    setError('');
+    try {
+      setMessage(await fn());
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const exportLocal = () =>
+    run(async () => {
+      const result = await callBackground({
+        type: 'backup.exportLocal',
+        credential: credentialPayload(),
+      });
+      triggerDownload(result.data, result.suggestedName);
+      return `Downloaded ${result.suggestedName}.`;
+    });
+
+  const exportOneDrive = () =>
+    run(async () => {
+      const result = await callBackground({
+        type: 'backup.exportToOneDrive',
+        credential: credentialPayload(),
+        ...(oneDrivePath.trim() ? { path: oneDrivePath.trim() } : {}),
+      });
+      return `${result.message} → ${result.path}`;
+    });
+
+  const importLocal = () =>
+    run(async () => {
+      if (!importFileB64) throw new Error('Select a backup file first');
+      await callBackground({
+        type: 'backup.importLocal',
+        data: importFileB64,
+        credential: credentialPayload(),
+      });
+      await onAfterImport();
+      return 'Backup restored. Re-enable Windows Hello and reconnect OneDrive if you used them.';
+    });
+
+  const importOneDrive = () =>
+    run(async () => {
+      if (!oneDrivePath.trim()) throw new Error('Enter the OneDrive backup file path');
+      await callBackground({
+        type: 'backup.importFromOneDrive',
+        path: oneDrivePath.trim(),
+        credential: credentialPayload(),
+      });
+      await onAfterImport();
+      return 'Backup restored from OneDrive. Re-enable Windows Hello and reconnect OneDrive if you used them.';
+    });
+
+  return (
+    <Stack gap="sm">
+      <BackLink label="Back to settings" onClick={onBack} />
+      <Title order={4}>Backup &amp; Restore</Title>
+
+      <Text size="xs" c="dimmed">
+        The vault, remembered key file and OneDrive configuration are packed
+        into a single encrypted .mkbackup file. Hello enrollment and OneDrive
+        token stay on this device.
+      </Text>
+
+      <SegmentedControl
+        fullWidth
+        value={direction}
+        onChange={(v) => setDirection(v as 'export' | 'import')}
+        data={[
+          { label: 'Export', value: 'export' },
+          { label: 'Import', value: 'import' },
+        ]}
+      />
+
+      <SegmentedControl
+        fullWidth
+        value={destination}
+        onChange={(v) => setDestination(v as 'local' | 'onedrive')}
+        data={[
+          { label: 'Local file', value: 'local' },
+          { label: 'OneDrive', value: 'onedrive' },
+        ]}
+      />
+
+      <PasswordInput
+        label="Backup password"
+        description="Encrypts the bundle. Independent of the vault master password."
+        value={password}
+        onChange={(e) => setPassword(e.currentTarget.value)}
+      />
+      <FileInput
+        label="Key file (optional)"
+        placeholder="Choose key file"
+        leftSection={<IconKey size={16} />}
+        clearable
+        onChange={pickKeyFile}
+      />
+
+      {direction === 'import' && destination === 'local' && (
+        <FileInput
+          label="Backup file"
+          accept=".mkbackup,application/octet-stream"
+          placeholder="Choose .mkbackup file"
+          leftSection={<IconFile size={16} />}
+          onChange={pickImportFile}
+        />
+      )}
+
+      {destination === 'onedrive' && (
+        <TextInput
+          label={direction === 'export' ? 'OneDrive path (optional)' : 'OneDrive backup file path'}
+          description={
+            direction === 'export'
+              ? 'Defaults to the vault folder with a timestamped name.'
+              : undefined
+          }
+          placeholder="/Apps/MonicaKeePass/monica-keepass-backup-….mkbackup"
+          value={oneDrivePath}
+          onChange={(e) => setOneDrivePath(e.currentTarget.value)}
+        />
+      )}
+
+      {direction === 'import' && (
+        <Alert color="yellow" variant="light" title="This replaces all extension data on this device">
+          <Text size="xs" mb="xs">
+            Current vault, remembered key file and OneDrive settings will be
+            overwritten with whatever the backup contains. Windows Hello
+            enrollment and any OneDrive session on this device are cleared.
+          </Text>
+          <Checkbox
+            label="I understand, continue"
+            checked={confirmImport}
+            onChange={(e) => setConfirmImport(e.currentTarget.checked)}
+          />
+        </Alert>
+      )}
+
+      {direction === 'export' && cannotExport && (
+        <Alert color="yellow" variant="light">
+          Import or create a vault before exporting a backup.
+        </Alert>
+      )}
+
+      {message && (
+        <Alert color="green" variant="light">
+          {message}
+        </Alert>
+      )}
+
+      <Group justify="flex-end">
+        {direction === 'export' && destination === 'local' && (
+          <Button
+            leftSection={<IconDownload size={16} />}
+            loading={busy}
+            disabled={!hasCred || cannotExport}
+            onClick={exportLocal}
+          >
+            Download backup
+          </Button>
+        )}
+        {direction === 'export' && destination === 'onedrive' && (
+          <Button
+            leftSection={<IconCloud size={16} />}
+            loading={busy}
+            disabled={!hasCred || cannotExport}
+            onClick={exportOneDrive}
+          >
+            Upload to OneDrive
+          </Button>
+        )}
+        {direction === 'import' && destination === 'local' && (
+          <Button
+            color="red"
+            loading={busy}
+            disabled={!hasCred || !importFileB64 || !confirmImport}
+            onClick={importLocal}
+          >
+            Restore from file
+          </Button>
+        )}
+        {direction === 'import' && destination === 'onedrive' && (
+          <Button
+            color="red"
+            loading={busy}
+            disabled={!hasCred || !oneDrivePath.trim() || !confirmImport}
+            onClick={importOneDrive}
+          >
+            Restore from OneDrive
+          </Button>
+        )}
+      </Group>
     </Stack>
   );
 }

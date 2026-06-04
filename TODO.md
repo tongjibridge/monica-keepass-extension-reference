@@ -27,19 +27,25 @@ copying KeePassXC-Browser's native-messaging architecture.
 
 ## P0 - High-Impact Daily Use
 
-- [ ] Save new login after form submit.
-  - Detect successful login or registration submit.
-  - Prompt to save URL, username, and password into the current vault.
-  - Avoid duplicate entries by matching URL + username.
-  - Acceptance: after logging into a site with no matching entry, the extension
-    offers to save credentials and the new entry appears in the popup.
+- [x] Save new login after form submit.
+  - Capture on `submit` capture-phase + submit-button click; ignore
+    `isTrusted=false` (browser autofill / our own injected fills).
+  - `decideSuggestion` (`src/autofill/suggest.ts`) compares URL+username and
+    silently skips when the stored password already matches.
+  - Suggestion surfaces in the popup banner with a toolbar badge and
+    `chrome.notifications` ping; user clicks Save → `vault.add`.
+  - Follow-ups: buffer captures while the vault is locked and re-decide on
+    unlock; show an inline in-page prompt instead of relying on the popup.
 
-- [ ] Update existing password after password change.
-  - Detect old/new password forms and password reset flows.
-  - Prompt to update the matched entry instead of creating a duplicate.
-  - Preserve old password in KeePass entry history via existing update flow.
-  - Acceptance: after changing a password, the extension offers to update the
-    correct entry and the saved password works on the next login.
+- [x] Update existing password after password change.
+  - Field-role heuristics (`autocomplete=current/new-password`, name/id hints)
+    detect change forms and capture both old and new passwords.
+  - When the captured `oldPassword` matches a stored entry, that entry is
+    targeted; otherwise the best URL match for the same username is used.
+  - `vault.update` already calls `pushHistory()`, so the old password lands in
+    KeePass entry history automatically.
+  - Follow-ups: surface a picker for `alternateEntryIds` when several entries
+    share the username and none match the old password.
 
 - [ ] Fill TOTP codes.
   - Detect OTP/TOTP fields and expose fill action near the field.

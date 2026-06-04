@@ -8,7 +8,15 @@ export default defineConfig({
     name: 'Monica KeePass',
     description:
       'KeePass-compatible password manager: Windows Hello unlock, autofill, password generation, OneDrive backup.',
-    permissions: ['storage', 'offscreen', 'alarms', 'activeTab', 'scripting', 'identity'],
+    permissions: [
+      'storage',
+      'offscreen',
+      'alarms',
+      'activeTab',
+      'scripting',
+      'identity',
+      'notifications',
+    ],
     host_permissions: ['<all_urls>'],
     action: {
       default_title: 'Monica KeePass',
