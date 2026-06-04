@@ -119,6 +119,12 @@ This project is released under the GNU General Public License v3.0 only
 (`GPL-3.0-only`), matching the license used by the Monica Android reference
 project. See [LICENSE](LICENSE) for the full text.
 
+## Third-party Acknowledgements
+
+This project uses open-source libraries including `kdbxweb`, `hash-wasm`,
+React, Mantine, Tabler Icons, `tldts`, WXT, esbuild, and TypeScript. See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for details.
+
 
 ## Repository Statistics
 ![Alt](https://repobeats.axiom.co/api/embed/4ca5ca412c6b1333c26aecf7b0669fd9a47064fd.svg "Repobeats analytics image")

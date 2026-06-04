@@ -113,6 +113,12 @@ KeePass 同步流程参考了安卓端实现：通过 Graph 文件元数据中�
 本项目使用 GNU General Public License v3.0 only（`GPL-3.0-only`），与 Monica
 安卓参考项目保持一致。完整文本见 [LICENSE](LICENSE)。
 
+## 第三方开源致谢
+
+本项目使用了 `kdbxweb`、`hash-wasm`、React、Mantine、Tabler Icons、`tldts`、
+WXT、esbuild、TypeScript 等开源项目。详情见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
 ## 统计数据
 ![Alt](https://repobeats.axiom.co/api/embed/4ca5ca412c6b1333c26aecf7b0669fd9a47064fd.svg "Repobeats analytics image")
 
