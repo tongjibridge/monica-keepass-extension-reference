@@ -44,6 +44,20 @@ jobs:
       - name: Package extension
         run: pnpm run zip
 
+      - name: Build CRX package
+        env:
+          CRX_PRIVATE_KEY_BASE64: ${{ secrets.CRX_PRIVATE_KEY_BASE64 }}
+        run: |
+          mkdir -p artifacts
+          if [[ "$GITHUB_REF" == refs/tags/v* && -z "$CRX_PRIVATE_KEY_BASE64" ]]; then
+            echo "CRX_PRIVATE_KEY_BASE64 is required for tagged releases." >&2
+            exit 1
+          fi
+          if [[ -z "$CRX_PRIVATE_KEY_BASE64" ]]; then
+            export CRX_ALLOW_EPHEMERAL=1
+          fi
+          pnpm run crx
+
       - name: Collect package
         run: |
           mkdir -p artifacts
@@ -53,7 +67,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: monica-keepass-extension-chrome
-          path: artifacts/*.zip
+          path: artifacts/*
           if-no-files-found: error
 
       - name: Publish GitHub release
@@ -61,4 +75,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" artifacts/*.zip --title "$GITHUB_REF_NAME" --generate-notes
+          gh release create "$GITHUB_REF_NAME" artifacts/* --title "$GITHUB_REF_NAME" --generate-notes

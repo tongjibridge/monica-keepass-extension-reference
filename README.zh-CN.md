@@ -69,6 +69,7 @@ pnpm run compile
 pnpm run test:harness
 pnpm run build
 pnpm run zip
+pnpm run crx
 ```
 
 ## GitHub Actions 自动打包
@@ -76,11 +77,23 @@ pnpm run zip
 仓库内置 `.github/workflows/build-extension.yml`。
 
 - 每次推送到 `main`、以及每个 pull request，都会自动运行类型检查、测试和
-  `pnpm run zip`。
-- 打包后的浏览器插件会作为 workflow artifact 上传，名称为
+  `pnpm run zip`，并生成 CRX 包。
+- 打包后的 `.zip` 和 `.crx` 会作为 workflow artifact 上传，名称为
   `monica-keepass-extension-chrome`。
 - 推送 `v0.1.0` 这类版本 tag 时，还会自动创建 GitHub Release，并把生成的
-  `.zip` 附加到 release。
+  `.zip` 和 `.crx` 附加到 release。
+
+如果要发布稳定 CRX，需要在 GitHub 仓库设置里添加 secret：
+`CRX_PRIVATE_KEY_BASE64`。它是 CRX 签名私钥 PEM 文件的 base64 内容。没有这个
+secret 时，普通分支构建仍会用临时私钥生成测试 CRX，但 tag release 会失败，
+避免发布扩展 ID 会变化的 CRX。
+
+生成私钥并输出 secret 值：
+
+```powershell
+openssl genrsa -out crx-private-key.pem 2048
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("crx-private-key.pem"))
+```
 
 发布一个版本：
 

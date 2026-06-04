@@ -72,6 +72,7 @@ pnpm run compile
 pnpm run test:harness
 pnpm run build
 pnpm run zip
+pnpm run crx
 ```
 
 ## GitHub Actions Packaging
@@ -79,11 +80,23 @@ pnpm run zip
 The repository includes `.github/workflows/build-extension.yml`.
 
 - Every push to `main` and every pull request runs type-checking, harness tests,
-  and `pnpm run zip`.
-- The zipped extension is uploaded as a workflow artifact named
+  `pnpm run zip`, and CRX packaging.
+- The zipped and CRX extension packages are uploaded as a workflow artifact named
   `monica-keepass-extension-chrome`.
 - Pushing a version tag such as `v0.1.0` also creates a GitHub Release and
-  attaches the generated `.zip`.
+  attaches the generated `.zip` and `.crx`.
+
+For stable CRX releases, add a repository secret named `CRX_PRIVATE_KEY_BASE64`.
+It must contain the base64-encoded PEM private key used to sign the CRX. Without
+this secret, normal branch builds still create a test CRX with a temporary key,
+but tagged releases fail to avoid publishing an extension with a changing ID.
+
+Generate a private key and print the secret value:
+
+```powershell
+openssl genrsa -out crx-private-key.pem 2048
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("crx-private-key.pem"))
+```
 
 To publish a release:
 
