@@ -1,11 +1,104 @@
-/* Popup window sizing; everything else is handled by Mantine. */
+@import 'tailwindcss';
+
+/* Explicit content sources so class detection is deterministic under WXT. */
+@source '../../entrypoints';
+@source '../../src/components';
+
+/* shadcn/ui design tokens — light theme, indigo primary. */
+:root {
+  --background: #f4f5f7;
+  --foreground: #1f2329;
+  --card: #ffffff;
+  --card-foreground: #1f2329;
+  --popover: #ffffff;
+  --popover-foreground: #1f2329;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --secondary: #eef0f3;
+  --secondary-foreground: #1f2329;
+  --muted: #eef0f3;
+  --muted-foreground: #6b7280;
+  --accent: #eef2ff;
+  --accent-foreground: #3730a3;
+  --destructive: #dc2626;
+  --border: #e3e6eb;
+  --input: #e3e6eb;
+  --ring: #4f46e5;
+  --radius: 0.625rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Minimal keyframes used by tooltip animate-in utilities. */
+  --animate-in: in 0.12s ease-out;
+}
+
+@keyframes in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@layer utilities {
+  .animate-in {
+    animation: var(--animate-in);
+  }
+  .fade-in-0,
+  .zoom-in-95 {
+    /* covered by the .animate-in keyframes; kept as no-op aliases */
+  }
+}
+
+/* Fixed-size popup (Bitwarden-style). A dynamic-height popup lets Chrome put a
+   scrollbar on the window itself, which steals ~17px from the fixed 380px
+   viewport and clips the right edge — so we pin the size and scroll inside
+   <main> only. 600px is Chrome's popup height limit. */
+html,
 body {
-  margin: 0;
   width: 380px;
+  height: 600px;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 #root {
-  min-height: 520px;
+  height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+#root main {
+  scrollbar-width: thin;
 }

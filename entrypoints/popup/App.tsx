@@ -1,40 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Alert,
-  Anchor,
-  Box,
-  Button,
-  Card,
-  Center,
-  Checkbox,
-  Divider,
-  FileInput,
-  Group,
-  Loader,
-  PasswordInput,
-  ScrollArea,
-  SegmentedControl,
-  Stack,
-  Text,
-  Textarea,
-  TextInput,
-  Title,
-  Tooltip,
-  UnstyledButton,
-  ActionIcon,
-  CopyButton,
-} from '@mantine/core';
-import {
   IconArrowLeft,
-  IconCheck,
   IconCloud,
-  IconCopy,
   IconDownload,
   IconEye,
   IconFile,
   IconFingerprint,
   IconFolder,
   IconKey,
+  IconLoader2,
   IconLock,
   IconPlus,
   IconRefresh,
@@ -43,6 +17,18 @@ import {
   IconUpload,
   IconWand,
 } from '@tabler/icons-react';
+import { Alert, AlertDescription, AlertTitle } from '@/src/components/ui/alert';
+import { Button } from '@/src/components/ui/button';
+import { Card } from '@/src/components/ui/card';
+import { CheckboxField } from '@/src/components/ui/checkbox';
+import { CopyIconButton } from '@/src/components/ui/copy-button';
+import { Field } from '@/src/components/ui/field';
+import { Input } from '@/src/components/ui/input';
+import { PasswordInput } from '@/src/components/ui/password-input';
+import { Separator } from '@/src/components/ui/separator';
+import { Tabs, TabsList, TabsTrigger } from '@/src/components/ui/tabs';
+import { Textarea } from '@/src/components/ui/textarea';
+import { Tooltip } from '@/src/components/ui/tooltip';
 import {
   base64ToBytes,
   bytesToBase64,
@@ -126,237 +112,249 @@ export function App() {
     });
 
   return (
-    <Box style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-      <Group
-        justify="space-between"
-        px="md"
-        py="xs"
-        style={{ borderBottom: '1px solid var(--mantine-color-gray-3)' }}
-      >
-        <Group gap={8}>
-          <img src="/icons/icon-32.png" alt="" width={24} height={24} />
-          <Title order={5} fw={650}>
-            Monica KeePass
-          </Title>
-        </Group>
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <img src="/icons/icon-32.png" alt="" className="size-6" />
+          <h1 className="text-[15px] font-semibold tracking-tight">Monica KeePass</h1>
+        </div>
         {status?.unlocked && (
-          <Group gap={2}>
+          <div className="flex items-center gap-0.5">
             <Tooltip label="Password generator">
-              <ActionIcon variant="subtle" color="gray" onClick={() => setView('generator')}>
-                <IconWand size={20} />
-              </ActionIcon>
+              <Button variant="ghost" size="iconSm" onClick={() => setView('generator')}>
+                <IconWand className="size-5" />
+              </Button>
             </Tooltip>
             <Tooltip label="Settings">
-              <ActionIcon variant="subtle" color="gray" onClick={() => setView('settings')}>
-                <IconSettings size={20} />
-              </ActionIcon>
+              <Button variant="ghost" size="iconSm" onClick={() => setView('settings')}>
+                <IconSettings className="size-5" />
+              </Button>
             </Tooltip>
             <Tooltip label="Lock vault">
-              <ActionIcon variant="subtle" color="gray" onClick={lock}>
-                <IconLock size={20} />
-              </ActionIcon>
+              <Button variant="ghost" size="iconSm" onClick={lock}>
+                <IconLock className="size-5" />
+              </Button>
             </Tooltip>
-          </Group>
+          </div>
         )}
-      </Group>
+      </header>
 
-      <ScrollArea style={{ flex: 1 }}>
-        <Box p="md">
-          {error && (
-            <Alert color="red" mb="md" variant="light" onClose={() => setError('')} withCloseButton>
-              {error}
-            </Alert>
-          )}
+      <main className="min-h-0 flex-1 overflow-y-auto p-4">
+        {error && (
+          <Alert variant="destructive" className="mb-4" onClose={() => setError('')}>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-          {status?.pending && (
-            <PendingBanner
-              status={status}
-              busy={busy}
-              onApply={(entryId) =>
-                run(async () => {
-                  await callBackground({ type: 'vault.applyPending', ...(entryId ? { entryId } : {}) });
-                  await refreshStatus();
-                  if (view === 'list') await loadEntries();
-                })
-              }
-              onDismiss={() =>
-                run(async () => {
-                  await callBackground({ type: 'vault.dismissPending' });
-                  await refreshStatus();
-                })
-              }
-            />
-          )}
+        {status?.pending && (
+          <PendingBanner
+            status={status}
+            busy={busy}
+            onApply={(entryId) =>
+              run(async () => {
+                await callBackground({ type: 'vault.applyPending', ...(entryId ? { entryId } : {}) });
+                await refreshStatus();
+                if (view === 'list') await loadEntries();
+              })
+            }
+            onDismiss={() =>
+              run(async () => {
+                await callBackground({ type: 'vault.dismissPending' });
+                await refreshStatus();
+              })
+            }
+          />
+        )}
 
-          {view === 'loading' && (
-            <Center mih={300}>
-              <Loader />
-            </Center>
-          )}
+        {view === 'loading' && (
+          <div className="flex min-h-[300px] items-center justify-center">
+            <IconLoader2 className="size-6 animate-spin text-muted-foreground" />
+          </div>
+        )}
 
-          {view === 'setup' && (
-            <SetupView
-              busy={busy}
-              canGoBack={status?.hasVault ?? false}
-              onBack={() => setView('locked')}
-              onCreate={(name, password) =>
-                run(async () => {
-                  await callBackground({ type: 'vault.createNew', name, password });
-                  setCredential({ password });
-                  await refreshStatus();
-                  setView('list');
-                })
-              }
-              onImport={(name, dataB64) =>
-                run(async () => {
-                  await callBackground({ type: 'vault.import', name, data: dataB64 });
-                  await refreshStatus();
-                  setView('locked');
-                })
-              }
-            />
-          )}
+        {view === 'setup' && (
+          <SetupView
+            busy={busy}
+            canGoBack={status?.hasVault ?? false}
+            onBack={() => setView('locked')}
+            onCreate={(name, password) =>
+              run(async () => {
+                await callBackground({ type: 'vault.createNew', name, password });
+                setCredential({ password });
+                await refreshStatus();
+                setView('list');
+              })
+            }
+            onImport={(name, dataB64) =>
+              run(async () => {
+                await callBackground({ type: 'vault.import', name, data: dataB64 });
+                await refreshStatus();
+                setView('locked');
+              })
+            }
+          />
+        )}
 
-          {view === 'locked' && status && (
-            <LockedView
-              busy={busy}
-              status={status}
-              onSwitchVault={() => {
-                setError('');
-                setView('setup');
-              }}
-              onUnlock={(cred, rememberKeyFile) =>
-                run(async () => {
-                  await callBackground({ type: 'vault.unlock', credential: cred, rememberKeyFile });
-                  setCredential(cred);
-                  await refreshStatus();
-                  setView('list');
-                })
-              }
-              onHello={() =>
-                run(async () => {
-                  const cred = await unlockWithHello();
-                  await callBackground({ type: 'vault.unlock', credential: cred });
-                  setCredential(cred);
-                  await refreshStatus();
-                  setView('list');
-                })
-              }
-            />
-          )}
+        {view === 'locked' && status && (
+          <LockedView
+            busy={busy}
+            status={status}
+            onSwitchVault={() => {
+              setError('');
+              setView('setup');
+            }}
+            onUnlock={(cred, rememberKeyFile) =>
+              run(async () => {
+                await callBackground({ type: 'vault.unlock', credential: cred, rememberKeyFile });
+                setCredential(cred);
+                await refreshStatus();
+                setView('list');
+              })
+            }
+            onHello={() =>
+              run(async () => {
+                const cred = await unlockWithHello();
+                await callBackground({ type: 'vault.unlock', credential: cred });
+                setCredential(cred);
+                await refreshStatus();
+                setView('list');
+              })
+            }
+          />
+        )}
 
-          {view === 'list' && (
-            <ListView
-              entries={entries}
-              onOpen={(id) =>
-                run(async () => {
-                  setSelected(await callBackground({ type: 'vault.getEntry', id, reveal: false }));
-                  setView('detail');
-                })
-              }
-              onAdd={() => {
+        {view === 'list' && (
+          <ListView
+            entries={entries}
+            onOpen={(id) =>
+              run(async () => {
+                setSelected(await callBackground({ type: 'vault.getEntry', id, reveal: false }));
+                setView('detail');
+              })
+            }
+            onAdd={() => {
+              setSelected(null);
+              setView('form');
+            }}
+          />
+        )}
+
+        {view === 'detail' && selected && (
+          <DetailView
+            entry={selected}
+            onReveal={() =>
+              run(async () => {
+                setSelected(
+                  await callBackground({ type: 'vault.getEntry', id: selected.id, reveal: true }),
+                );
+              })
+            }
+            onEdit={() => setView('form')}
+            onDelete={() =>
+              run(async () => {
+                await callBackground({ type: 'vault.delete', id: selected.id });
+                await loadEntries();
                 setSelected(null);
-                setView('form');
-              }}
-            />
-          )}
+                setView('list');
+              })
+            }
+            onBack={() => setView('list')}
+          />
+        )}
 
-          {view === 'detail' && selected && (
-            <DetailView
-              entry={selected}
-              onReveal={() =>
-                run(async () => {
-                  setSelected(
-                    await callBackground({ type: 'vault.getEntry', id: selected.id, reveal: true }),
-                  );
-                })
-              }
-              onEdit={() => setView('form')}
-              onDelete={() =>
-                run(async () => {
-                  await callBackground({ type: 'vault.delete', id: selected.id });
-                  await loadEntries();
-                  setSelected(null);
-                  setView('list');
-                })
-              }
-              onBack={() => setView('list')}
-            />
-          )}
+        {view === 'form' && (
+          <EntryForm
+            existing={selected}
+            busy={busy}
+            onCancel={() => setView(selected ? 'detail' : 'list')}
+            onSave={(input) =>
+              run(async () => {
+                if (selected) {
+                  await callBackground({
+                    type: 'vault.update',
+                    input: { id: selected.id, ...input },
+                  });
+                } else {
+                  await callBackground({ type: 'vault.add', input });
+                }
+                await loadEntries();
+                setView('list');
+              })
+            }
+          />
+        )}
 
-          {view === 'form' && (
-            <EntryForm
-              existing={selected}
-              busy={busy}
-              onCancel={() => setView(selected ? 'detail' : 'list')}
-              onSave={(input) =>
-                run(async () => {
-                  if (selected) {
-                    await callBackground({
-                      type: 'vault.update',
-                      input: { id: selected.id, ...input },
-                    });
-                  } else {
-                    await callBackground({ type: 'vault.add', input });
-                  }
-                  await loadEntries();
-                  setView('list');
-                })
-              }
-            />
-          )}
+        {view === 'generator' && (
+          <div className="grid gap-3">
+            <Generator />
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={() => setView(status?.unlocked ? 'list' : 'locked')}>
+                Done
+              </Button>
+            </div>
+          </div>
+        )}
 
-          {view === 'generator' && (
-            <Stack>
-              <Generator />
-              <Group justify="flex-end">
-                <Button variant="default" onClick={() => setView(status?.unlocked ? 'list' : 'locked')}>
-                  Done
-                </Button>
-              </Group>
-            </Stack>
-          )}
+        {view === 'settings' && status && (
+          <SettingsView
+            status={status}
+            credential={credential}
+            onChanged={refreshStatus}
+            onBack={() => setView('list')}
+            onOpenBackup={() => setView('backup')}
+            setError={setError}
+          />
+        )}
 
-          {view === 'settings' && status && (
-            <SettingsView
-              status={status}
-              credential={credential}
-              onChanged={refreshStatus}
-              onBack={() => setView('list')}
-              onOpenBackup={() => setView('backup')}
-              setError={setError}
-            />
-          )}
-
-          {view === 'backup' && status && (
-            <BackupView
-              status={status}
-              onBack={() => setView('settings')}
-              onAfterImport={async () => {
-                setCredential(null);
-                setEntries([]);
-                setSelected(null);
-                const s = await refreshStatus();
-                setView(s.unlocked ? 'list' : 'locked');
-              }}
-              setError={setError}
-            />
-          )}
-        </Box>
-      </ScrollArea>
-    </Box>
+        {view === 'backup' && status && (
+          <BackupView
+            status={status}
+            onBack={() => setView('settings')}
+            onAfterImport={async () => {
+              setCredential(null);
+              setEntries([]);
+              setSelected(null);
+              const s = await refreshStatus();
+              setView(s.unlocked ? 'list' : 'locked');
+            }}
+            setError={setError}
+          />
+        )}
+      </main>
+    </div>
   );
 }
 
 function BackLink({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <Anchor component="button" type="button" size="sm" onClick={onClick} mb="sm">
-      <Group gap={4}>
-        <IconArrowLeft size={14} />
-        {label}
-      </Group>
-    </Anchor>
+    <button
+      type="button"
+      className="mb-1 inline-flex w-fit items-center gap-1 text-sm font-medium text-primary hover:underline"
+      onClick={onClick}
+    >
+      <IconArrowLeft className="size-3.5" />
+      {label}
+    </button>
   );
+}
+
+function FileField({
+  label,
+  accept,
+  onFile,
+}: {
+  label?: string;
+  accept?: string;
+  onFile: (file: File | null) => void;
+}) {
+  const input = (
+    <Input
+      type="file"
+      accept={accept}
+      onChange={(e) => onFile(e.currentTarget.files?.[0] ?? null)}
+    />
+  );
+  return label ? <Field label={label}>{input}</Field> : input;
 }
 
 function SetupView({
@@ -382,44 +380,36 @@ function SetupView({
   };
 
   return (
-    <Stack>
+    <div className="grid gap-3">
       {canGoBack && <BackLink label="Back to unlock" onClick={onBack} />}
-      <SegmentedControl
-        fullWidth
-        value={mode}
-        onChange={(v) => setMode(v as 'create' | 'import')}
-        data={[
-          { label: 'Create', value: 'create' },
-          { label: 'Import .kdbx', value: 'import' },
-        ]}
-      />
+      <Tabs value={mode} onValueChange={(v) => setMode(v as 'create' | 'import')}>
+        <TabsList>
+          <TabsTrigger value="create">Create</TabsTrigger>
+          <TabsTrigger value="import">Import .kdbx</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {mode === 'create' ? (
         <>
-          <TextInput label="Vault name" value={name} onChange={(e) => setName(e.currentTarget.value)} />
-          <PasswordInput
-            label="Master password"
-            value={password}
-            onChange={(e) => setPassword(e.currentTarget.value)}
-          />
+          <Field label="Vault name">
+            <Input value={name} onChange={(e) => setName(e.currentTarget.value)} />
+          </Field>
+          <Field label="Master password">
+            <PasswordInput value={password} onChange={(e) => setPassword(e.currentTarget.value)} />
+          </Field>
           <Button disabled={busy || !password || !name} onClick={() => onCreate(name, password)}>
             Create vault
           </Button>
         </>
       ) : (
         <>
-          <Text size="sm" c="dimmed">
+          <p className="text-sm text-muted-foreground">
             Select an existing KeePass .kdbx file to manage in this browser.
-          </Text>
-          <FileInput
-            accept=".kdbx"
-            placeholder="Choose .kdbx file"
-            leftSection={<IconKey size={16} />}
-            onChange={handleFile}
-          />
+          </p>
+          <FileField accept=".kdbx" onFile={handleFile} />
         </>
       )}
-    </Stack>
+    </div>
   );
 }
 
@@ -453,34 +443,26 @@ function LockedView({
     onUnlock({ password: password || null, keyFile: keyFileB64 ?? undefined }, remember);
 
   return (
-    <Stack>
-      <PasswordInput
-        label="Master password"
-        description="Leave empty for a key-file-only vault"
-        data-autofocus
-        value={password}
-        onChange={(e) => setPassword(e.currentTarget.value)}
-        onKeyDown={(e) => e.key === 'Enter' && canUnlock && submit()}
-      />
+    <div className="grid gap-3">
+      <Field label="Master password" description="Leave empty for a key-file-only vault">
+        <PasswordInput
+          autoFocus
+          value={password}
+          onChange={(e) => setPassword(e.currentTarget.value)}
+          onKeyDown={(e) => e.key === 'Enter' && canUnlock && submit()}
+        />
+      </Field>
 
       {status.rememberedKeyFile && !keyFileB64 ? (
-        <Text size="sm" c="dimmed">
-          Using remembered key file on this device.
-        </Text>
+        <p className="text-sm text-muted-foreground">Using remembered key file on this device.</p>
       ) : (
-        <FileInput
-          label="Key file (optional)"
-          placeholder="Choose key file"
-          leftSection={<IconKey size={16} />}
-          clearable
-          onChange={pickKeyFile}
-        />
+        <FileField label="Key file (optional)" onFile={pickKeyFile} />
       )}
       {keyFileB64 && (
-        <Checkbox
+        <CheckboxField
           label="Remember key file on this device"
           checked={remember}
-          onChange={(e) => setRemember(e.currentTarget.checked)}
+          onCheckedChange={setRemember}
         />
       )}
 
@@ -488,19 +470,19 @@ function LockedView({
         Unlock
       </Button>
       {status.helloEnrolled && (
-        <Button
-          variant="default"
-          leftSection={<IconFingerprint size={18} />}
-          disabled={busy}
-          onClick={onHello}
-        >
+        <Button variant="outline" disabled={busy} onClick={onHello}>
+          <IconFingerprint className="size-4.5" />
           Unlock with Windows Hello
         </Button>
       )}
-      <Anchor component="button" type="button" size="sm" c="dimmed" onClick={onSwitchVault}>
+      <button
+        type="button"
+        className="mx-auto text-sm text-muted-foreground hover:text-foreground hover:underline"
+        onClick={onSwitchVault}
+      >
         Use a different vault…
-      </Anchor>
-    </Stack>
+      </button>
+    </div>
   );
 }
 
@@ -526,42 +508,40 @@ function ListView({
   }, [entries, query]);
 
   return (
-    <Stack gap="sm">
-      <Group gap="xs" wrap="nowrap">
-        <TextInput
-          style={{ flex: 1 }}
+    <div className="grid gap-3">
+      <div className="flex items-center gap-2">
+        <Input
+          type="search"
+          className="flex-1"
           placeholder="Search…"
           value={query}
           onChange={(e) => setQuery(e.currentTarget.value)}
         />
         <Tooltip label="Add entry">
-          <ActionIcon size="lg" onClick={onAdd}>
-            <IconPlus size={18} />
-          </ActionIcon>
+          <Button size="icon" onClick={onAdd}>
+            <IconPlus className="size-4.5" />
+          </Button>
         </Tooltip>
-      </Group>
+      </div>
 
       {filtered.length === 0 ? (
-        <Text c="dimmed" size="sm" ta="center" mt="lg">
-          No entries.
-        </Text>
+        <p className="mt-4 text-center text-sm text-muted-foreground">No entries.</p>
       ) : (
-        <Stack gap={8}>
+        <div className="grid gap-2">
           {filtered.map((e) => (
-            <UnstyledButton key={e.id} onClick={() => onOpen(e.id)} style={{ width: '100%' }}>
-              <Card withBorder padding="sm" radius="md">
-                <Text fw={600} size="sm">
-                  {e.title || '(untitled)'}
-                </Text>
-                <Text size="xs" c="dimmed">
-                  {e.username || e.url}
-                </Text>
-              </Card>
-            </UnstyledButton>
+            <button
+              key={e.id}
+              type="button"
+              className="w-full rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/40"
+              onClick={() => onOpen(e.id)}
+            >
+              <p className="text-sm font-semibold">{e.title || '(untitled)'}</p>
+              <p className="text-xs text-muted-foreground">{e.username || e.url}</p>
+            </button>
           ))}
-        </Stack>
+        </div>
       )}
-    </Stack>
+    </div>
   );
 }
 
@@ -569,21 +549,11 @@ function CopyRow({ label, value }: { label: string; value: string }) {
   if (!value) return null;
   return (
     <div>
-      <Text size="xs" c="dimmed">
-        {label}
-      </Text>
-      <Group gap="xs" wrap="nowrap" align="center">
-        <Text size="sm" style={{ flex: 1, wordBreak: 'break-all' }}>
-          {value}
-        </Text>
-        <CopyButton value={value}>
-          {({ copied, copy }) => (
-            <ActionIcon variant="subtle" color="gray" onClick={copy}>
-              {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
-            </ActionIcon>
-          )}
-        </CopyButton>
-      </Group>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <div className="flex items-center gap-2">
+        <p className="flex-1 break-all text-sm">{value}</p>
+        <CopyIconButton value={value} />
+      </div>
     </div>
   );
 }
@@ -602,48 +572,39 @@ function DetailView({
   onBack: () => void;
 }) {
   return (
-    <Stack gap="sm">
+    <div className="grid gap-3">
       <BackLink label="Back" onClick={onBack} />
-      <Title order={4}>{entry.title || '(untitled)'}</Title>
+      <h2 className="text-lg font-semibold">{entry.title || '(untitled)'}</h2>
 
       <CopyRow label="Username" value={entry.username} />
 
       <div>
-        <Text size="xs" c="dimmed">
-          Password
-        </Text>
-        <Group gap="xs" wrap="nowrap">
-          <Text size="sm" ff="monospace" style={{ flex: 1, wordBreak: 'break-all' }}>
-            {entry.password ?? '••••••••'}
-          </Text>
+        <p className="text-xs text-muted-foreground">Password</p>
+        <div className="flex items-center gap-2">
+          <p className="flex-1 break-all font-mono text-sm">{entry.password ?? '••••••••'}</p>
           {entry.password ? (
-            <CopyButton value={entry.password}>
-              {({ copied, copy }) => (
-                <ActionIcon variant="subtle" color="gray" onClick={copy}>
-                  {copied ? <IconCheck size={16} /> : <IconCopy size={16} />}
-                </ActionIcon>
-              )}
-            </CopyButton>
+            <CopyIconButton value={entry.password} />
           ) : (
             <Tooltip label="Reveal">
-              <ActionIcon variant="subtle" color="gray" onClick={onReveal}>
-                <IconEye size={16} />
-              </ActionIcon>
+              <Button variant="ghost" size="iconSm" onClick={onReveal}>
+                <IconEye className="size-4" />
+              </Button>
             </Tooltip>
           )}
-        </Group>
+        </div>
       </div>
 
       <CopyRow label="URL" value={entry.url} />
       <CopyRow label="Notes" value={entry.notes} />
 
-      <Group mt="md">
+      <div className="mt-2 flex gap-2">
         <Button onClick={onEdit}>Edit</Button>
-        <Button variant="light" color="red" leftSection={<IconTrash size={16} />} onClick={onDelete}>
+        <Button variant="softDestructive" onClick={onDelete}>
+          <IconTrash className="size-4" />
           Delete
         </Button>
-      </Group>
-    </Stack>
+      </div>
+    </div>
   );
 }
 
@@ -666,24 +627,33 @@ function EntryForm({
   const [showGen, setShowGen] = useState(false);
 
   return (
-    <Stack gap="sm">
+    <div className="grid gap-3">
       <BackLink label="Cancel" onClick={onCancel} />
-      <TextInput label="Title" value={title} onChange={(e) => setTitle(e.currentTarget.value)} />
-      <TextInput label="Username" value={username} onChange={(e) => setUsername(e.currentTarget.value)} />
-      <TextInput
-        label="Password"
-        value={password}
-        onChange={(e) => setPassword(e.currentTarget.value)}
-        rightSection={
-          <Tooltip label="Generate">
-            <ActionIcon variant="subtle" color="gray" onClick={() => setShowGen((v) => !v)}>
-              <IconWand size={16} />
-            </ActionIcon>
-          </Tooltip>
-        }
-      />
+      <Field label="Title">
+        <Input value={title} onChange={(e) => setTitle(e.currentTarget.value)} />
+      </Field>
+      <Field label="Username">
+        <Input value={username} onChange={(e) => setUsername(e.currentTarget.value)} />
+      </Field>
+      <Field label="Password">
+        <div className="relative">
+          <Input
+            className="pe-9 font-mono"
+            value={password}
+            onChange={(e) => setPassword(e.currentTarget.value)}
+          />
+          <button
+            type="button"
+            title="Generate"
+            className="absolute inset-y-0 end-0 flex w-9 items-center justify-center text-muted-foreground hover:text-foreground"
+            onClick={() => setShowGen((v) => !v)}
+          >
+            <IconWand className="size-4" />
+          </button>
+        </div>
+      </Field>
       {showGen && (
-        <Card withBorder padding="sm" radius="md">
+        <Card>
           <Generator
             onUse={(pw) => {
               setPassword(pw);
@@ -692,14 +662,18 @@ function EntryForm({
           />
         </Card>
       )}
-      <TextInput label="URL" value={url} onChange={(e) => setUrl(e.currentTarget.value)} />
-      <Textarea label="Notes" value={notes} onChange={(e) => setNotes(e.currentTarget.value)} autosize minRows={2} />
-      <Group justify="flex-end">
+      <Field label="URL">
+        <Input value={url} onChange={(e) => setUrl(e.currentTarget.value)} />
+      </Field>
+      <Field label="Notes">
+        <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.currentTarget.value)} />
+      </Field>
+      <div className="flex justify-end">
         <Button disabled={busy} onClick={() => onSave({ title, username, password, url, notes })}>
           Save
         </Button>
-      </Group>
-    </Stack>
+      </div>
+    </div>
   );
 }
 
@@ -868,41 +842,38 @@ function SettingsView({
   };
 
   return (
-    <Stack gap="sm">
+    <div className="grid gap-3">
       <BackLink label="Back" onClick={onBack} />
-      <Title order={4}>Settings</Title>
+      <h2 className="text-lg font-semibold">Settings</h2>
 
       <div>
-        <Text size="xs" c="dimmed">
-          Vault
-        </Text>
-        <Text size="sm">
+        <p className="text-xs text-muted-foreground">Vault</p>
+        <p className="text-sm">
           {status.meta?.name} · {status.meta?.entryCount} entries
-        </Text>
+        </p>
       </div>
 
-      <Divider />
+      <Separator />
 
-      <div>
-        <Text size="sm" fw={600} mb={6}>
-          Windows Hello
-        </Text>
+      <div className="grid gap-1.5">
+        <p className="text-sm font-semibold">Windows Hello</p>
         {available === false && (
-          <Text size="xs" c="dimmed" mb={6}>
+          <p className="text-xs text-muted-foreground">
             No platform authenticator available on this device.
-          </Text>
+          </p>
         )}
         {status.helloEnrolled ? (
-          <Button variant="light" color="red" loading={helloBusy} onClick={disable}>
+          <Button variant="softDestructive" className="w-fit" loading={helloBusy} onClick={disable}>
             Disable Windows Hello
           </Button>
         ) : (
           <Button
-            leftSection={<IconFingerprint size={18} />}
+            className="w-fit"
             disabled={available !== true || !credential}
             loading={helloBusy}
             onClick={enable}
           >
+            <IconFingerprint className="size-4.5" />
             Enable Windows Hello
           </Button>
         )}
@@ -910,188 +881,169 @@ function SettingsView({
 
       {status.rememberedKeyFile && (
         <>
-          <Divider />
-          <div>
-            <Text size="sm" fw={600} mb={6}>
-              Key file
-            </Text>
-            <Button variant="light" color="red" onClick={forgetKeyFile}>
+          <Separator />
+          <div className="grid gap-1.5">
+            <p className="text-sm font-semibold">Key file</p>
+            <Button variant="softDestructive" className="w-fit" onClick={forgetKeyFile}>
               Forget remembered key file
             </Button>
           </div>
         </>
       )}
 
-      <Divider />
+      <Separator />
 
-      <div>
-        <Text size="sm" fw={600} mb={6}>
-          Backup &amp; Restore
-        </Text>
-        <Text size="xs" c="dimmed" mb={6}>
-          Pack all extension data into a single encrypted file for migration to
-          another device.
-        </Text>
-        <Button
-          variant="light"
-          leftSection={<IconDownload size={16} />}
-          onClick={onOpenBackup}
-        >
+      <div className="grid gap-1.5">
+        <p className="text-sm font-semibold">Backup &amp; Restore</p>
+        <p className="text-xs text-muted-foreground">
+          Pack all extension data into a single encrypted file for migration to another device.
+        </p>
+        <Button variant="soft" className="w-fit" onClick={onOpenBackup}>
+          <IconDownload className="size-4" />
           Open backup &amp; restore
         </Button>
       </div>
 
-      <Divider />
+      <Separator />
 
-      <div>
-        <Group gap={6} mb={6}>
-          <IconCloud size={18} />
-          <Text size="sm" fw={600}>
-            OneDrive
-          </Text>
-        </Group>
+      <div className="grid gap-2">
+        <div className="flex items-center gap-1.5">
+          <IconCloud className="size-4.5" />
+          <p className="text-sm font-semibold">OneDrive</p>
+        </div>
         {oneDriveMessage && (
-          <Alert color="green" mb="sm" variant="light">
-            {oneDriveMessage}
+          <Alert variant="success">
+            <AlertDescription>{oneDriveMessage}</AlertDescription>
           </Alert>
         )}
-        <Stack gap="xs">
-          <TextInput
-            label="Selected OneDrive vault"
+        <Field label="Selected OneDrive vault">
+          <Input
             placeholder="Connect and choose a .kdbx file"
             value={oneDriveRemotePath}
             onChange={(e) => setOneDriveRemotePath(e.currentTarget.value)}
           />
-          {oneDrive?.redirectUrl && (
-            <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
-              Redirect URI: {oneDrive.redirectUrl}
-            </Text>
-          )}
-          {oneDrive?.sync?.lastSuccessAt && (
-            <Text size="xs" c="dimmed">
-              Last synced {new Date(oneDrive.sync.lastSuccessAt).toLocaleString()}
-            </Text>
-          )}
-          {oneDrive?.sync?.failureMessage && (
-            <Text size="xs" c="red">
-              {oneDrive.sync.failureMessage}
-            </Text>
-          )}
-          <Group gap="xs">
-            <Button
-              variant="default"
-              loading={oneDriveBusy}
-              disabled={!oneDriveRemotePath}
-              onClick={saveOneDriveConfig}
-            >
-              Save path
-            </Button>
-            <Button
-              loading={oneDriveBusy}
-              onClick={connectOneDrive}
-            >
-              {oneDrive?.connected ? 'Reconnect' : 'Connect'}
-            </Button>
-            {oneDrive?.connected && (
-              <Button variant="light" color="red" loading={oneDriveBusy} onClick={disconnectOneDrive}>
-                Disconnect
-              </Button>
-            )}
-          </Group>
+        </Field>
+        {oneDrive?.redirectUrl && (
+          <p className="break-all text-xs text-muted-foreground">
+            Redirect URI: {oneDrive.redirectUrl}
+          </p>
+        )}
+        {oneDrive?.sync?.lastSuccessAt && (
+          <p className="text-xs text-muted-foreground">
+            Last synced {new Date(oneDrive.sync.lastSuccessAt).toLocaleString()}
+          </p>
+        )}
+        {oneDrive?.sync?.failureMessage && (
+          <p className="text-xs text-destructive">{oneDrive.sync.failureMessage}</p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            loading={oneDriveBusy}
+            disabled={!oneDriveRemotePath}
+            onClick={saveOneDriveConfig}
+          >
+            Save path
+          </Button>
+          <Button loading={oneDriveBusy} onClick={connectOneDrive}>
+            {oneDrive?.connected ? 'Reconnect' : 'Connect'}
+          </Button>
           {oneDrive?.connected && (
-            <Card withBorder padding="sm" radius="md">
-              <Stack gap="xs">
-                <Group justify="space-between" wrap="nowrap">
-                  <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
-                    /{oneDriveFolder}
-                  </Text>
-                  <Group gap={4} wrap="nowrap">
-                    {oneDriveFolder && (
-                      <Button size="compact-xs" variant="default" onClick={goUpOneDriveFolder}>
-                        Up
+            <Button variant="softDestructive" loading={oneDriveBusy} onClick={disconnectOneDrive}>
+              Disconnect
+            </Button>
+          )}
+        </div>
+        {oneDrive?.connected && (
+          <Card className="grid gap-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="break-all text-xs text-muted-foreground">/{oneDriveFolder}</p>
+              <div className="flex items-center gap-1">
+                {oneDriveFolder && (
+                  <Button size="xs" variant="outline" onClick={goUpOneDriveFolder}>
+                    Up
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="iconSm"
+                  loading={oneDriveBusy}
+                  onClick={() =>
+                    loadOneDriveFolder(oneDriveFolder).catch((e) => setError(describeError(e)))
+                  }
+                >
+                  <IconRefresh className="size-4" />
+                </Button>
+              </div>
+            </div>
+            {oneDriveItems.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No folders or .kdbx files here.</p>
+            ) : (
+              <div className="grid gap-1">
+                {oneDriveItems.map((item) => (
+                  <div key={item.id} className="flex items-center gap-2">
+                    {item.isFolder ? (
+                      <IconFolder className="size-4 shrink-0 text-amber-500" />
+                    ) : (
+                      <IconFile className="size-4 shrink-0 text-primary" />
+                    )}
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 rounded px-1 py-0.5 text-left hover:bg-secondary"
+                      onClick={() =>
+                        item.isFolder
+                          ? loadOneDriveFolder(item.path).catch((e) => setError(describeError(e)))
+                          : selectOneDriveVault(item)
+                      }
+                    >
+                      <p className="truncate text-sm">{item.name}</p>
+                      {!item.isFolder && item.lastModified && (
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(item.lastModified).toLocaleDateString()}
+                        </p>
+                      )}
+                    </button>
+                    {!item.isFolder && (
+                      <Button size="xs" variant="soft" onClick={() => selectOneDriveVault(item)}>
+                        Use
                       </Button>
                     )}
-                    <ActionIcon
-                      variant="subtle"
-                      color="gray"
-                      loading={oneDriveBusy}
-                      onClick={() => loadOneDriveFolder(oneDriveFolder).catch((e) => setError(describeError(e)))}
-                    >
-                      <IconRefresh size={16} />
-                    </ActionIcon>
-                  </Group>
-                </Group>
-                {oneDriveItems.length === 0 ? (
-                  <Text size="xs" c="dimmed">
-                    No folders or .kdbx files here.
-                  </Text>
-                ) : (
-                  <Stack gap={4}>
-                    {oneDriveItems.map((item) => (
-                      <Group key={item.id} gap="xs" wrap="nowrap">
-                        <ActionIcon variant="subtle" color={item.isFolder ? 'yellow' : 'blue'}>
-                          {item.isFolder ? <IconFolder size={16} /> : <IconFile size={16} />}
-                        </ActionIcon>
-                        <UnstyledButton
-                          style={{ flex: 1, minWidth: 0 }}
-                          onClick={() =>
-                            item.isFolder
-                              ? loadOneDriveFolder(item.path).catch((e) => setError(describeError(e)))
-                              : selectOneDriveVault(item)
-                          }
-                        >
-                          <Text size="sm" truncate>
-                            {item.name}
-                          </Text>
-                          {!item.isFolder && item.lastModified && (
-                            <Text size="xs" c="dimmed">
-                              {new Date(item.lastModified).toLocaleDateString()}
-                            </Text>
-                          )}
-                        </UnstyledButton>
-                        {!item.isFolder && (
-                          <Button size="compact-xs" variant="light" onClick={() => selectOneDriveVault(item)}>
-                            Use
-                          </Button>
-                        )}
-                      </Group>
-                    ))}
-                  </Stack>
-                )}
-              </Stack>
-            </Card>
-          )}
-          <Group gap="xs">
-            <Button
-              variant="light"
-              leftSection={<IconDownload size={16} />}
-              loading={oneDriveBusy}
-              disabled={!oneDrive?.connected || !oneDriveRemotePath}
-              onClick={() => oneDriveAction('onedrive.pull')}
-            >
-              Pull
-            </Button>
-            <Button
-              variant="light"
-              leftSection={<IconUpload size={16} />}
-              loading={oneDriveBusy}
-              disabled={!oneDrive?.connected || !oneDriveRemotePath}
-              onClick={() => oneDriveAction('onedrive.push')}
-            >
-              Push
-            </Button>
-            <Button
-              leftSection={<IconRefresh size={16} />}
-              loading={oneDriveBusy}
-              disabled={!oneDrive?.connected || !oneDriveRemotePath}
-              onClick={() => oneDriveAction('onedrive.sync')}
-            >
-              Sync
-            </Button>
-          </Group>
-        </Stack>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="soft"
+            loading={oneDriveBusy}
+            disabled={!oneDrive?.connected || !oneDriveRemotePath}
+            onClick={() => oneDriveAction('onedrive.pull')}
+          >
+            <IconDownload className="size-4" />
+            Pull
+          </Button>
+          <Button
+            variant="soft"
+            loading={oneDriveBusy}
+            disabled={!oneDrive?.connected || !oneDriveRemotePath}
+            onClick={() => oneDriveAction('onedrive.push')}
+          >
+            <IconUpload className="size-4" />
+            Push
+          </Button>
+          <Button
+            loading={oneDriveBusy}
+            disabled={!oneDrive?.connected || !oneDriveRemotePath}
+            onClick={() => oneDriveAction('onedrive.sync')}
+          >
+            <IconRefresh className="size-4" />
+            Sync
+          </Button>
+        </div>
       </div>
-    </Stack>
+    </div>
   );
 }
 
@@ -1117,27 +1069,25 @@ function PendingBanner({
     : `Replace the password for "${pending.entryTitle || account}" on ${pending.origin}.`;
 
   return (
-    <Alert color="indigo" mb="md" variant="light" title={title} icon={<IconKey size={16} />}>
-      <Text size="sm" mb="sm">
-        {description}
-      </Text>
-      {!status.unlocked && (
-        <Text size="xs" c="dimmed" mb="sm">
-          Unlock the vault to save.
-        </Text>
-      )}
-      <Group gap="xs">
-        <Button
-          size="xs"
-          disabled={busy || !status.unlocked}
-          onClick={() => onApply()}
-        >
-          {isSave ? 'Save' : 'Update'}
-        </Button>
-        <Button size="xs" variant="default" disabled={busy} onClick={onDismiss}>
-          Dismiss
-        </Button>
-      </Group>
+    <Alert variant="info" className="mb-4">
+      <div className="flex items-start gap-2">
+        <IconKey className="mt-0.5 size-4 shrink-0" />
+        <div className="grid gap-2">
+          <AlertTitle>{title}</AlertTitle>
+          <AlertDescription>{description}</AlertDescription>
+          {!status.unlocked && (
+            <p className="text-xs text-muted-foreground">Unlock the vault to save.</p>
+          )}
+          <div className="flex gap-2">
+            <Button size="xs" disabled={busy || !status.unlocked} onClick={() => onApply()}>
+              {isSave ? 'Save' : 'Update'}
+            </Button>
+            <Button size="xs" variant="outline" disabled={busy} onClick={onDismiss}>
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      </div>
     </Alert>
   );
 }
@@ -1264,125 +1214,108 @@ function BackupView({
     });
 
   return (
-    <Stack gap="sm">
+    <div className="grid gap-3">
       <BackLink label="Back to settings" onClick={onBack} />
-      <Title order={4}>Backup &amp; Restore</Title>
+      <h2 className="text-lg font-semibold">Backup &amp; Restore</h2>
 
-      <Text size="xs" c="dimmed">
-        The vault, remembered key file and OneDrive configuration are packed
-        into a single encrypted .mkbackup file. Hello enrollment and OneDrive
-        token stay on this device.
-      </Text>
+      <p className="text-xs text-muted-foreground">
+        The vault, remembered key file and OneDrive configuration are packed into a single
+        encrypted .mkbackup file. Hello enrollment and OneDrive token stay on this device.
+      </p>
 
-      <SegmentedControl
-        fullWidth
-        value={direction}
-        onChange={(v) => setDirection(v as 'export' | 'import')}
-        data={[
-          { label: 'Export', value: 'export' },
-          { label: 'Import', value: 'import' },
-        ]}
-      />
+      <Tabs value={direction} onValueChange={(v) => setDirection(v as 'export' | 'import')}>
+        <TabsList>
+          <TabsTrigger value="export">Export</TabsTrigger>
+          <TabsTrigger value="import">Import</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
-      <SegmentedControl
-        fullWidth
-        value={destination}
-        onChange={(v) => setDestination(v as 'local' | 'onedrive')}
-        data={[
-          { label: 'Local file', value: 'local' },
-          { label: 'OneDrive', value: 'onedrive' },
-        ]}
-      />
+      <Tabs value={destination} onValueChange={(v) => setDestination(v as 'local' | 'onedrive')}>
+        <TabsList>
+          <TabsTrigger value="local">Local file</TabsTrigger>
+          <TabsTrigger value="onedrive">OneDrive</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
-      <PasswordInput
+      <Field
         label="Backup password"
         description="Encrypts the bundle. Independent of the vault master password."
-        value={password}
-        onChange={(e) => setPassword(e.currentTarget.value)}
-      />
-      <FileInput
-        label="Key file (optional)"
-        placeholder="Choose key file"
-        leftSection={<IconKey size={16} />}
-        clearable
-        onChange={pickKeyFile}
-      />
+      >
+        <PasswordInput value={password} onChange={(e) => setPassword(e.currentTarget.value)} />
+      </Field>
+      <FileField label="Key file (optional)" onFile={pickKeyFile} />
 
       {direction === 'import' && destination === 'local' && (
-        <FileInput
+        <FileField
           label="Backup file"
           accept=".mkbackup,application/octet-stream"
-          placeholder="Choose .mkbackup file"
-          leftSection={<IconFile size={16} />}
-          onChange={pickImportFile}
+          onFile={pickImportFile}
         />
       )}
 
       {destination === 'onedrive' && (
-        <TextInput
+        <Field
           label={direction === 'export' ? 'OneDrive path (optional)' : 'OneDrive backup file path'}
           description={
             direction === 'export'
               ? 'Defaults to the vault folder with a timestamped name.'
               : undefined
           }
-          placeholder="/Apps/MonicaKeePass/monica-keepass-backup-….mkbackup"
-          value={oneDrivePath}
-          onChange={(e) => setOneDrivePath(e.currentTarget.value)}
-        />
+        >
+          <Input
+            placeholder="/Apps/MonicaKeePass/monica-keepass-backup-….mkbackup"
+            value={oneDrivePath}
+            onChange={(e) => setOneDrivePath(e.currentTarget.value)}
+          />
+        </Field>
       )}
 
       {direction === 'import' && (
-        <Alert color="yellow" variant="light" title="This replaces all extension data on this device">
-          <Text size="xs" mb="xs">
-            Current vault, remembered key file and OneDrive settings will be
-            overwritten with whatever the backup contains. Windows Hello
-            enrollment and any OneDrive session on this device are cleared.
-          </Text>
-          <Checkbox
-            label="I understand, continue"
-            checked={confirmImport}
-            onChange={(e) => setConfirmImport(e.currentTarget.checked)}
-          />
+        <Alert variant="warning">
+          <AlertTitle>This replaces all extension data on this device</AlertTitle>
+          <AlertDescription>
+            <p className="mb-2 text-xs">
+              Current vault, remembered key file and OneDrive settings will be overwritten with
+              whatever the backup contains. Windows Hello enrollment and any OneDrive session on
+              this device are cleared.
+            </p>
+            <CheckboxField
+              label="I understand, continue"
+              checked={confirmImport}
+              onCheckedChange={setConfirmImport}
+            />
+          </AlertDescription>
         </Alert>
       )}
 
       {direction === 'export' && cannotExport && (
-        <Alert color="yellow" variant="light">
-          Import or create a vault before exporting a backup.
+        <Alert variant="warning">
+          <AlertDescription>Import or create a vault before exporting a backup.</AlertDescription>
         </Alert>
       )}
 
       {message && (
-        <Alert color="green" variant="light">
-          {message}
+        <Alert variant="success">
+          <AlertDescription>{message}</AlertDescription>
         </Alert>
       )}
 
-      <Group justify="flex-end">
+      <div className="flex justify-end">
         {direction === 'export' && destination === 'local' && (
-          <Button
-            leftSection={<IconDownload size={16} />}
-            loading={busy}
-            disabled={!hasCred || cannotExport}
-            onClick={exportLocal}
-          >
+          <Button loading={busy} disabled={!hasCred || cannotExport} onClick={exportLocal}>
+            <IconDownload className="size-4" />
             Download backup
           </Button>
         )}
         {direction === 'export' && destination === 'onedrive' && (
-          <Button
-            leftSection={<IconCloud size={16} />}
-            loading={busy}
-            disabled={!hasCred || cannotExport}
-            onClick={exportOneDrive}
-          >
+          <Button loading={busy} disabled={!hasCred || cannotExport} onClick={exportOneDrive}>
+            <IconCloud className="size-4" />
             Upload to OneDrive
           </Button>
         )}
         {direction === 'import' && destination === 'local' && (
           <Button
-            color="red"
+            variant="destructive"
             loading={busy}
             disabled={!hasCred || !importFileB64 || !confirmImport}
             onClick={importLocal}
@@ -1392,7 +1325,7 @@ function BackupView({
         )}
         {direction === 'import' && destination === 'onedrive' && (
           <Button
-            color="red"
+            variant="destructive"
             loading={busy}
             disabled={!hasCred || !oneDrivePath.trim() || !confirmImport}
             onClick={importOneDrive}
@@ -1400,7 +1333,7 @@ function BackupView({
             Restore from OneDrive
           </Button>
         )}
-      </Group>
-    </Stack>
+      </div>
+    </div>
   );
 }
