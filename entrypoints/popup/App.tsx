@@ -657,6 +657,7 @@ function EntryForm({
           <Generator
             onUse={(pw) => {
               setPassword(pw);
+              void navigator.clipboard.writeText(pw).catch(() => undefined);
               setShowGen(false);
             }}
           />
