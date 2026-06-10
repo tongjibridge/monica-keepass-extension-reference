@@ -76,6 +76,12 @@
   }
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 /* Fixed-size popup (Bitwarden-style). A dynamic-height popup lets Chrome put a
    scrollbar on the window itself, which steals ~17px from the fixed 380px
    viewport and clips the right edge — so we pin the size and scroll inside
@@ -83,9 +89,11 @@
 html,
 body {
   width: 380px;
+  max-width: 380px;
   height: 600px;
   margin: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: hidden;
 }
 
 body {
@@ -94,11 +102,16 @@ body {
 }
 
 #root {
+  width: 100%;
+  max-width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 #root main {
+  width: 100%;
+  max-width: 100%;
   scrollbar-width: thin;
 }

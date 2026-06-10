@@ -113,13 +113,13 @@ export function App() {
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
-      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-card px-4 py-2.5">
-        <div className="flex items-center gap-2">
+      <header className="sticky top-0 z-10 flex min-w-0 items-center justify-between gap-3 border-b border-border bg-card px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-2">
           <img src="/icons/icon-32.png" alt="" className="size-6" />
-          <h1 className="text-[15px] font-semibold tracking-tight">Monica KeePass</h1>
+          <h1 className="truncate text-[15px] font-semibold tracking-tight">Monica KeePass</h1>
         </div>
         {status?.unlocked && (
-          <div className="flex items-center gap-0.5">
+          <div className="shrink-0 flex items-center gap-0.5">
             <Tooltip label="Password generator">
               <Button variant="ghost" size="iconSm" onClick={() => setView('generator')}>
                 <IconWand className="size-5" />
@@ -139,7 +139,7 @@ export function App() {
         )}
       </header>
 
-      <main className="min-h-0 flex-1 overflow-y-auto p-4">
+      <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-4">
         {error && (
           <Alert variant="destructive" className="mb-4" onClose={() => setError('')}>
             <AlertDescription>{error}</AlertDescription>
@@ -508,11 +508,11 @@ function ListView({
   }, [entries, query]);
 
   return (
-    <div className="grid gap-3">
-      <div className="flex items-center gap-2">
+    <div className="grid min-w-0 gap-3">
+      <div className="flex min-w-0 items-center gap-2">
         <Input
           type="search"
-          className="flex-1"
+          className="min-w-0 flex-1"
           placeholder="Search…"
           value={query}
           onChange={(e) => setQuery(e.currentTarget.value)}
@@ -527,16 +527,16 @@ function ListView({
       {filtered.length === 0 ? (
         <p className="mt-4 text-center text-sm text-muted-foreground">No entries.</p>
       ) : (
-        <div className="grid gap-2">
+        <div className="grid min-w-0 gap-2">
           {filtered.map((e) => (
             <button
               key={e.id}
               type="button"
-              className="w-full rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/40"
+              className="max-w-full overflow-hidden rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/40"
               onClick={() => onOpen(e.id)}
             >
-              <p className="text-sm font-semibold">{e.title || '(untitled)'}</p>
-              <p className="text-xs text-muted-foreground">{e.username || e.url}</p>
+              <p className="truncate text-sm font-semibold">{e.title || '(untitled)'}</p>
+              <p className="truncate text-xs text-muted-foreground">{e.username || e.url}</p>
             </button>
           ))}
         </div>
