@@ -2,6 +2,8 @@ import type {
   EntryDetail,
   EntrySummary,
   GroupSummary,
+  KdfInfo,
+  KdfProfile,
   NewEntryInput,
   UpdateEntryInput,
   VaultMeta,
@@ -75,6 +77,8 @@ export type BgRequest =
   | { type: 'vault.delete'; id: string }
   | { type: 'vault.match'; url: string }
   | { type: 'vault.export' }
+  | { type: 'vault.kdfInfo' }
+  | { type: 'vault.setKdf'; profile: Exclude<KdfProfile, 'custom'> }
   | { type: 'vault.capture'; snapshot: CredentialSnapshot }
   | { type: 'vault.applyPending'; entryId?: string }
   | { type: 'vault.dismissPending' }
@@ -149,7 +153,11 @@ export interface BgResultMap {
   'vault.delete': null;
   'vault.match': EntrySummary[];
   'vault.export': string;
-  'vault.capture': null;
+  'vault.kdfInfo': KdfInfo;
+  'vault.setKdf': KdfInfo;
+  // Returns the resulting suggestion so the capturing tab can render an
+  // in-page save/update prompt (null = nothing to suggest).
+  'vault.capture': PendingSuggestion | null;
   'vault.applyPending': VaultStatus;
   'vault.dismissPending': VaultStatus;
   'backup.exportLocal': BackupExportLocalResult;
@@ -191,6 +199,8 @@ export type OffscreenOp =
   | { op: 'update'; input: UpdateEntryInput }
   | { op: 'delete'; id: string }
   | { op: 'save' }
+  | { op: 'kdfInfo' }
+  | { op: 'setKdf'; profile: Exclude<KdfProfile, 'custom'> }
   | { op: 'mergeRemote'; data: string; password: string | null; keyFile?: string };
 
 export interface OffscreenEnvelope {

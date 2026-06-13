@@ -38,7 +38,7 @@ import {
   type VaultStatus,
 } from '@/src/messaging/protocol';
 import { DEFAULT_ONEDRIVE_CLIENT_ID, type OneDriveListItem } from '@/src/onedrive/graph';
-import type { EntryDetail, EntrySummary, NewEntryInput } from '@/src/vault/types';
+import type { EntryDetail, EntrySummary, KdfInfo, NewEntryInput } from '@/src/vault/types';
 import { clearHello, enrollHello, isHelloAvailable, unlockWithHello } from '@/src/hello/webauthn';
 import { Generator } from './Generator';
 
@@ -702,10 +702,28 @@ function SettingsView({
   const [oneDriveItems, setOneDriveItems] = useState<OneDriveListItem[]>([]);
   const [oneDriveBusy, setOneDriveBusy] = useState(false);
   const [oneDriveMessage, setOneDriveMessage] = useState('');
+  const [kdf, setKdf] = useState<KdfInfo | null>(null);
+  const [kdfBusy, setKdfBusy] = useState(false);
 
   useEffect(() => {
     isHelloAvailable().then(setAvailable);
+    callBackground({ type: 'vault.kdfInfo' })
+      .then(setKdf)
+      .catch(() => setKdf(null));
   }, []);
+
+  const applyKdf = async (profile: 'fast' | 'balanced' | 'secure') => {
+    if (kdfBusy) return;
+    setKdfBusy(true);
+    setError('');
+    try {
+      setKdf(await callBackground({ type: 'vault.setKdf', profile }));
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setKdfBusy(false);
+    }
+  };
 
   useEffect(() => {
     callBackground({ type: 'onedrive.status' })
@@ -891,6 +909,39 @@ function SettingsView({
           </div>
         </>
       )}
+
+      <Separator />
+
+      <div className="grid gap-1.5">
+        <p className="text-sm font-semibold">Encryption strength</p>
+        <p className="text-xs text-muted-foreground">
+          Higher strength resists brute-force better but makes unlocking and saving slower.
+          {kdf && (
+            <>
+              {' '}
+              Current: {kdf.kdf === 'aes' ? 'AES-KDF' : kdf.kdf}, {kdf.memoryKiB} KiB · {kdf.iterations}{' '}
+              iter.
+            </>
+          )}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {(['fast', 'balanced', 'secure'] as const).map((p) => (
+            <Button
+              key={p}
+              size="sm"
+              variant={kdf?.profile === p ? 'default' : 'outline'}
+              loading={kdfBusy}
+              onClick={() => applyKdf(p)}
+            >
+              {p === 'fast' ? 'Fast' : p === 'balanced' ? 'Balanced' : 'Secure'}
+            </Button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Fast ≈ 19 MiB · Balanced ≈ 64 MiB · Secure ≈ 256 MiB. Re-encrypts the vault once; unlock
+          speed changes next time.
+        </p>
+      </div>
 
       <Separator />
 

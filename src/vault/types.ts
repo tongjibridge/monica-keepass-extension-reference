@@ -29,6 +29,16 @@ export interface VaultMeta {
   groupCount: number;
 }
 
+export type KdfProfile = 'fast' | 'balanced' | 'secure' | 'custom';
+
+export interface KdfInfo {
+  kdf: 'argon2id' | 'argon2d' | 'aes' | 'unknown';
+  memoryKiB: number;
+  iterations: number;
+  parallelism: number;
+  profile: KdfProfile;
+}
+
 export interface NewEntryInput {
   title: string;
   username: string;

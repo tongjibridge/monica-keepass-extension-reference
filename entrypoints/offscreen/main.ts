@@ -38,6 +38,10 @@ async function handle(op: OffscreenOp): Promise<unknown> {
       return null;
     case 'save':
       return bytesToBase64(await VaultEngine.save());
+    case 'kdfInfo':
+      return VaultEngine.getKdfInfo();
+    case 'setKdf':
+      return VaultEngine.setKdfProfile(op.profile);
     case 'mergeRemote':
       return bytesToBase64(
         await VaultEngine.mergeRemote(

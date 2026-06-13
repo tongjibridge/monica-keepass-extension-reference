@@ -1,4 +1,8 @@
-import { callBackground, type CredentialSnapshot } from '@/src/messaging/protocol';
+import {
+  callBackground,
+  type CredentialSnapshot,
+  type PendingSuggestion,
+} from '@/src/messaging/protocol';
 import { DEFAULT_PASSWORD_OPTIONS, generatePassword } from '@/src/crypto/generator';
 import type { EntrySummary } from '@/src/vault/types';
 
@@ -334,6 +338,7 @@ class CredentialCapture {
   private userTypedPasswords = new WeakSet<HTMLInputElement>();
   // Per-session dedupe to avoid double-firing for the same submission.
   private lastSent = '';
+  private prompt = new SavePrompt();
 
   init() {
     document.addEventListener('input', this.onInput, true);
@@ -430,7 +435,121 @@ class CredentialCapture {
     const dedupe = `${snapshot.kind}|${snapshot.username}|${snapshot.password}|${snapshot.oldPassword ?? ''}`;
     if (dedupe === this.lastSent) return;
     this.lastSent = dedupe;
-    void callBackground({ type: 'vault.capture', snapshot }).catch(() => {});
+    void this.sendCapture(snapshot);
+  }
+
+  private async sendCapture(snapshot: CredentialSnapshot) {
+    try {
+      const suggestion = await callBackground({ type: 'vault.capture', snapshot });
+      if (suggestion) this.prompt.show(suggestion);
+    } catch {
+      // background unavailable or vault locked — nothing to prompt.
+    }
+  }
+}
+
+// In-page save/update prompt. Rendered as a floating card (bottom-right) so the
+// user can store credentials without opening the popup or seeing an OS-level
+// notification. Inline styles only, to avoid inheriting host-page CSS.
+class SavePrompt {
+  private host: HTMLDivElement | null = null;
+
+  show(suggestion: PendingSuggestion) {
+    this.close();
+    const isSave = suggestion.action === 'save';
+    const account = suggestion.username || '(no username)';
+    const title = isSave ? 'Save to Monica KeePass?' : 'Update saved password?';
+    const detail = isSave
+      ? `${escapeHtml(account)} · ${escapeHtml(suggestion.origin)}`
+      : `${escapeHtml(suggestion.entryTitle || account)} · ${escapeHtml(suggestion.origin)}`;
+
+    const host = document.createElement('div');
+    host.setAttribute('data-monica-save-prompt', '');
+    Object.assign(host.style, {
+      position: 'fixed',
+      right: '16px',
+      bottom: '16px',
+      width: '320px',
+      maxWidth: 'calc(100vw - 32px)',
+      boxSizing: 'border-box',
+      background: '#ffffff',
+      color: '#1f2329',
+      border: '1px solid #e3e6eb',
+      borderRadius: '12px',
+      boxShadow: '0 12px 32px rgba(16,24,40,0.22)',
+      zIndex: '2147483647',
+      padding: '14px',
+      font: '14px system-ui, -apple-system, "Segoe UI", sans-serif',
+    } satisfies Partial<CSSStyleDeclaration>);
+
+    host.innerHTML = `
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <div style="flex:0 0 auto;width:28px;height:28px;border-radius:8px;background:#eef2ff;display:flex;align-items:center;justify-content:center">
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3 19 6v5.7c0 5-3 7.9-7 9.3-4-1.4-7-4.3-7-9.3V6l7-3Z" fill="#4f46e5"/>
+            <path d="M10.5 12.4 9 11l-1 1 2.5 2.6L16 9.6 15 8.6Z" fill="#fff"/>
+          </svg>
+        </div>
+        <div style="flex:1 1 auto;min-width:0">
+          <div style="font-weight:600;line-height:1.3">${escapeHtml(title)}</div>
+          <div style="color:#6b7280;font-size:12px;margin-top:2px;word-break:break-all">${detail}</div>
+        </div>
+        <button data-act="close" aria-label="Close" style="flex:0 0 auto;border:none;background:none;cursor:pointer;color:#9aa3b2;padding:2px;line-height:0">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6 6 18M6 6l12 12" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div data-err style="display:none;color:#dc2626;font-size:12px;margin-top:8px"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button data-act="dismiss" style="cursor:pointer;border:1px solid #e3e6eb;background:#fff;color:#1f2329;border-radius:8px;padding:7px 12px;font:inherit;font-weight:550">Not now</button>
+        <button data-act="apply" style="cursor:pointer;border:1px solid #4f46e5;background:#4f46e5;color:#fff;border-radius:8px;padding:7px 14px;font:inherit;font-weight:550">${isSave ? 'Save' : 'Update'}</button>
+      </div>
+    `;
+
+    host.addEventListener('click', (e) => e.stopPropagation());
+    host.querySelector('[data-act=close]')?.addEventListener('click', () => this.close());
+    host.querySelector('[data-act=dismiss]')?.addEventListener('click', () => {
+      void callBackground({ type: 'vault.dismissPending' }).catch(() => {});
+      this.close();
+    });
+    host.querySelector('[data-act=apply]')?.addEventListener('click', (e) => {
+      void this.apply(e.currentTarget as HTMLButtonElement);
+    });
+
+    document.body.appendChild(host);
+    this.host = host;
+  }
+
+  private async apply(button: HTMLButtonElement) {
+    button.disabled = true;
+    button.textContent = 'Saving…';
+    button.style.opacity = '0.7';
+    try {
+      await callBackground({ type: 'vault.applyPending' });
+      this.flashSaved();
+    } catch (err) {
+      button.disabled = false;
+      button.style.opacity = '1';
+      const errEl = this.host?.querySelector<HTMLDivElement>('[data-err]');
+      if (errEl) {
+        errEl.textContent = err instanceof Error ? err.message : 'Could not save';
+        errEl.style.display = 'block';
+      }
+    }
+  }
+
+  private flashSaved() {
+    if (!this.host) return;
+    this.host.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16a34a" stroke-width="2.6"><path d="m5 12.5 4.5 4.5L19 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span style="font-weight:600">Saved to Monica KeePass</span>
+      </div>`;
+    setTimeout(() => this.close(), 1400);
+  }
+
+  close() {
+    this.host?.remove();
+    this.host = null;
   }
 }
 

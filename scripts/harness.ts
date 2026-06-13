@@ -13,6 +13,7 @@ import {
   type EnrichedEntry,
 } from '@/src/autofill/suggest';
 import { backupFilenameFor, exportBackup, importBackup } from '@/src/backup/codec';
+import { argon2ComputeCount } from '@/src/crypto/argon2';
 
 let passed = 0;
 function assert(cond: boolean, msg: string) {
@@ -62,6 +63,35 @@ async function main() {
   assert(VaultEngine.listEntries().length === 2, 'entries persist across save/open');
   const reAfter = VaultEngine.listEntries().find((e) => e.title === 'GitHub')!;
   assert(VaultEngine.getEntry(reAfter.id, true).password === 'rotated', 'rotated password persisted');
+
+  // --- ① salt-freeze + Argon2 memoization: saves must not recompute the KDF ---
+  const beforeSaves = argon2ComputeCount();
+  for (let i = 0; i < 5; i++) {
+    VaultEngine.updateEntry({ id: reAfter.id, password: `rot-${i}` });
+    await VaultEngine.save();
+  }
+  assert(
+    argon2ComputeCount() === beforeSaves,
+    `5 saves reuse the cached KDF (0 extra Argon2 runs, was ${argon2ComputeCount() - beforeSaves})`,
+  );
+  // The frozen-salt output must still decrypt correctly after a real reopen.
+  const afterFrozen = await VaultEngine.save();
+  await VaultEngine.open(afterFrozen, PW);
+  assert(
+    VaultEngine.getEntry(VaultEngine.listEntries().find((e) => e.title === 'GitHub')!.id, true)
+      .password === 'rot-4',
+    'frozen-salt saves still reopen and decrypt',
+  );
+
+  // --- ② KDF profile: re-key to a different preset, vault still opens ---
+  const fastInfo = VaultEngine.setKdfProfile('fast');
+  assert(fastInfo.profile === 'fast' && fastInfo.memoryKiB === 19456, 'setKdfProfile(fast) applied');
+  const beforeReKdf = argon2ComputeCount();
+  const reKeyed = await VaultEngine.save();
+  assert(argon2ComputeCount() === beforeReKdf + 1, 'changing KDF params forces exactly one recompute');
+  await VaultEngine.open(reKeyed, PW);
+  assert(VaultEngine.getKdfInfo().profile === 'fast', 're-keyed vault reopens with fast profile');
+  assert(VaultEngine.getKdfInfo().kdf.startsWith('argon2'), 're-key keeps an Argon2 KDF');
 
   VaultEngine.deleteEntry(reAfter.id);
   assert(

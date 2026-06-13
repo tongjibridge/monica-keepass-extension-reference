@@ -51,7 +51,6 @@ const ONEDRIVE_CONFIG_KEY = 'onedrive.config';
 const ONEDRIVE_TOKEN_KEY = 'onedrive.token';
 const ONEDRIVE_SYNC_KEY = 'onedrive.sync';
 const PENDING_KEY = 'autofill.pending';
-const PENDING_NOTIFICATION_ID = 'monica.pending';
 const AUTO_LOCK_ALARM = 'autolock';
 const AUTO_LOCK_MINUTES = 15;
 
@@ -185,9 +184,19 @@ async function route(req: BgRequest): Promise<unknown> {
     case 'vault.export':
       return callOffscreen({ op: 'save' });
 
+    case 'vault.kdfInfo':
+      return callOffscreen({ op: 'kdfInfo' });
+
+    case 'vault.setKdf': {
+      const info = await callOffscreen({ op: 'setKdf', profile: req.profile });
+      // Re-encrypt with the new parameters and store it.
+      await persist();
+      armAutoLock();
+      return info;
+    }
+
     case 'vault.capture':
-      await handleCapture(req.snapshot);
-      return null;
+      return handleCapture(req.snapshot);
 
     case 'vault.applyPending':
       await applyPending(req.entryId);
@@ -261,12 +270,12 @@ async function getStatus(): Promise<VaultStatus> {
   return { unlocked, hasVault: file != null, helloEnrolled, rememberedKeyFile, meta, pending };
 }
 
-async function handleCapture(snapshot: CredentialSnapshot): Promise<void> {
-  if (!snapshot?.password) return;
+async function handleCapture(snapshot: CredentialSnapshot): Promise<PendingSuggestion | null> {
+  if (!snapshot?.password) return null;
   // Cannot decide save vs update without entries; drop while locked.
-  if (!(await hasOffscreen())) return;
+  if (!(await hasOffscreen())) return null;
   const offscreenStatus = (await callOffscreen({ op: 'status' })) as { unlocked: boolean };
-  if (!offscreenStatus.unlocked) return;
+  if (!offscreenStatus.unlocked) return null;
 
   const entries = (await callOffscreen({ op: 'listEntries' })) as EntrySummary[];
   const urlMatched = matchEntriesForUrl(entries, snapshot.url);
@@ -284,8 +293,10 @@ async function handleCapture(snapshot: CredentialSnapshot): Promise<void> {
   );
 
   const suggestion = decideSuggestion(enriched, snapshot);
-  if (!suggestion) return;
+  if (!suggestion) return null;
   await setPending(suggestion);
+  // The capturing content script renders the in-page prompt from this return.
+  return suggestion;
 }
 
 async function applyPending(overrideEntryId?: string): Promise<void> {
@@ -329,11 +340,9 @@ async function setPending(suggestion: PendingSuggestion | null): Promise<void> {
   if (suggestion) {
     await chrome.storage.session.set({ [PENDING_KEY]: suggestion });
     await safeSetBadge('1', '#2563eb');
-    notifyPending(suggestion);
   } else {
     await chrome.storage.session.remove(PENDING_KEY);
     await safeSetBadge('', '#000000');
-    chrome.notifications?.clear?.(PENDING_NOTIFICATION_ID).catch(() => {});
   }
 }
 
@@ -344,26 +353,6 @@ async function safeSetBadge(text: string, color: string): Promise<void> {
   } catch {
     // chrome.action may not exist in test contexts; ignore.
   }
-}
-
-function notifyPending(suggestion: PendingSuggestion): void {
-  if (!chrome.notifications?.create) return;
-  const title =
-    suggestion.action === 'save' ? 'Save credentials?' : 'Update saved password?';
-  const account = suggestion.username || 'this account';
-  const message =
-    suggestion.action === 'save'
-      ? `Save ${account} on ${suggestion.origin} into Monica KeePass.`
-      : `Update the stored password for ${suggestion.entryTitle || account} on ${suggestion.origin}.`;
-  chrome.notifications
-    .create(PENDING_NOTIFICATION_ID, {
-      type: 'basic',
-      iconUrl: chrome.runtime.getURL('icons/icon-128.png'),
-      title,
-      message,
-      priority: 0,
-    })
-    .catch(() => {});
 }
 
 async function loadFile(): Promise<StoredFile | null> {
