@@ -39,6 +39,7 @@ class Autofiller {
   private controls: HTMLDivElement | null = null;
   private activeField: HTMLInputElement | null = null;
   private controlField: HTMLInputElement | null = null;
+  private generator = new GeneratorPopover();
 
   init() {
     document.addEventListener('focusin', this.onFocus, true);
@@ -60,6 +61,7 @@ class Autofiller {
     if (!target) return;
     if (this.menu?.contains(target)) return;
     if (this.controls?.contains(target)) return;
+    if (this.generator.contains(target)) return;
     if (target instanceof HTMLInputElement && isFillField(target)) {
       if (target !== this.activeField) this.closeMenu();
       return;
@@ -147,12 +149,8 @@ class Autofiller {
       ev.stopPropagation();
       const targetField = this.controlField;
       if (!targetField || targetField.type !== 'password') return;
-      const password = generatePassword(DEFAULT_PASSWORD_OPTIONS);
-      setNativeValue(targetField, password);
-      targetField.focus();
-      targetField.select();
       this.closeMenu();
-      this.updateControlsPosition();
+      this.generator.open(targetField);
     });
     this.controls.appendChild(generateButton);
   }
@@ -326,6 +324,167 @@ class Autofiller {
     this.controls?.remove();
     this.controls = null;
     this.controlField = null;
+  }
+}
+
+// Floating password generator. Lets the user pick a length (defaulting to the
+// field's current length), preview the password, then copy + fill on demand.
+class GeneratorPopover {
+  private host: HTMLDivElement | null = null;
+  private field: HTMLInputElement | null = null;
+  private length = DEFAULT_PASSWORD_OPTIONS.length;
+  private value = '';
+
+  contains(node: Node | null): boolean {
+    return !!node && !!this.host && this.host.contains(node);
+  }
+
+  open(field: HTMLInputElement) {
+    this.close();
+    this.field = field;
+    this.length = clamp(field.value.length || DEFAULT_PASSWORD_OPTIONS.length, 8, 64);
+    this.value = this.generate();
+
+    const host = document.createElement('div');
+    host.setAttribute('data-monica-generator', '');
+    Object.assign(host.style, {
+      position: 'fixed',
+      width: '300px',
+      maxWidth: 'calc(100vw - 24px)',
+      boxSizing: 'border-box',
+      background: '#ffffff',
+      color: '#1f2329',
+      border: '1px solid #e3e6eb',
+      borderRadius: '12px',
+      boxShadow: '0 12px 32px rgba(16,24,40,0.22)',
+      zIndex: '2147483647',
+      padding: '14px',
+      font: '14px system-ui, -apple-system, "Segoe UI", sans-serif',
+    } satisfies Partial<CSSStyleDeclaration>);
+
+    host.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <span style="font-weight:600">Generate password</span>
+        <button data-act="close" aria-label="Close" style="border:none;background:none;cursor:pointer;color:#9aa3b2;padding:2px;line-height:0">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6 6 18M6 6l12 12" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div data-out style="margin-top:10px;padding:10px;border:1px solid #e3e6eb;border-radius:8px;background:#f7f8fa;font-family:ui-monospace,'Cascadia Code',monospace;font-size:13px;word-break:break-all;user-select:all"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px">
+        <span style="color:#6b7280;font-size:12px">Length</span>
+        <span data-len style="font-weight:600"></span>
+      </div>
+      <input data-range type="range" min="8" max="64" style="width:100%;margin-top:6px;accent-color:#4f46e5" />
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button data-act="regen" style="cursor:pointer;border:1px solid #e3e6eb;background:#fff;color:#1f2329;border-radius:8px;padding:7px 12px;font:inherit;font-weight:550">Regenerate</button>
+        <button data-act="fill" style="cursor:pointer;border:1px solid #4f46e5;background:#4f46e5;color:#fff;border-radius:8px;padding:7px 14px;font:inherit;font-weight:550">Fill</button>
+      </div>
+    `;
+
+    host.addEventListener('click', (e) => e.stopPropagation());
+    const range = host.querySelector<HTMLInputElement>('[data-range]')!;
+    range.value = String(this.length);
+    range.addEventListener('input', () => {
+      this.length = Number(range.value);
+      this.value = this.generate();
+      this.render();
+    });
+    host.querySelector('[data-act=close]')?.addEventListener('click', () => this.close());
+    host.querySelector('[data-act=regen]')?.addEventListener('click', () => {
+      this.value = this.generate();
+      this.render();
+    });
+    host.querySelector('[data-act=fill]')?.addEventListener('click', () => void this.fill());
+
+    document.body.appendChild(host);
+    this.host = host;
+    this.render();
+    this.reposition();
+    window.addEventListener('scroll', this.reposition, true);
+    window.addEventListener('resize', this.reposition);
+  }
+
+  private generate(): string {
+    return generatePassword({ ...DEFAULT_PASSWORD_OPTIONS, length: this.length });
+  }
+
+  private render() {
+    if (!this.host) return;
+    const out = this.host.querySelector<HTMLDivElement>('[data-out]');
+    const len = this.host.querySelector<HTMLSpanElement>('[data-len]');
+    if (out) out.textContent = this.value;
+    if (len) len.textContent = String(this.length);
+  }
+
+  private reposition = () => {
+    if (!this.host || !this.field || !document.contains(this.field)) {
+      this.close();
+      return;
+    }
+    const rect = this.field.getBoundingClientRect();
+    const width = this.host.offsetWidth || 300;
+    const left = Math.min(rect.left, window.innerWidth - width - 12);
+    const belowSpace = window.innerHeight - rect.bottom;
+    const top =
+      belowSpace > (this.host.offsetHeight || 220) + 8
+        ? rect.bottom + 6
+        : Math.max(8, rect.top - (this.host.offsetHeight || 220) - 6);
+    this.host.style.left = `${Math.max(12, left)}px`;
+    this.host.style.top = `${top}px`;
+  };
+
+  private async fill() {
+    const field = this.field;
+    if (!field) return;
+    const password = this.value;
+    await copyText(password);
+
+    // Fill the invoking field plus any sibling password fields that aren't the
+    // "current/old" password (so signup password + confirm both get the value).
+    const form = field.form;
+    const targets = form
+      ? Array.from(form.querySelectorAll<HTMLInputElement>('input[type=password]')).filter(
+          (p) => !p.disabled && !p.readOnly && roleOfPasswordField(p) !== 'current',
+        )
+      : [field];
+    if (!targets.includes(field)) targets.push(field);
+    for (const t of targets) setNativeValue(t, password);
+
+    field.focus();
+    this.close();
+  }
+
+  close() {
+    window.removeEventListener('scroll', this.reposition, true);
+    window.removeEventListener('resize', this.reposition);
+    this.host?.remove();
+    this.host = null;
+    this.field = null;
+  }
+}
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n));
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch {
+      return false;
+    }
   }
 }
 
