@@ -25,7 +25,9 @@ import {
   type EnrichedEntry,
   type PendingSuggestion,
 } from '@/src/autofill/suggest';
+import { csvToEntries } from '@/src/import/csv';
 import type { EntryDetail, EntrySummary, VaultMeta } from '@/src/vault/types';
+import type { ImportResult } from '@/src/messaging/protocol';
 import {
   conflictPath,
   DEFAULT_ONEDRIVE_CLIENT_ID,
@@ -184,6 +186,9 @@ async function route(req: BgRequest): Promise<unknown> {
     case 'vault.export':
       return callOffscreen({ op: 'save' });
 
+    case 'vault.importCsv':
+      return importCsv(req.csv);
+
     case 'vault.kdfInfo':
       return callOffscreen({ op: 'kdfInfo' });
 
@@ -268,6 +273,24 @@ async function getStatus(): Promise<VaultStatus> {
     if (unlocked) meta = (await callOffscreen({ op: 'meta' })) as VaultMeta;
   }
   return { unlocked, hasVault: file != null, helloEnrolled, rememberedKeyFile, meta, pending };
+}
+
+async function importCsv(csv: string): Promise<ImportResult> {
+  if (!(await hasOffscreen())) throw new Error('Unlock the vault first');
+  const offscreenStatus = (await callOffscreen({ op: 'status' })) as { unlocked: boolean };
+  if (!offscreenStatus.unlocked) throw new Error('Unlock the vault first');
+
+  const { entries } = csvToEntries(csv);
+  if (entries.length === 0) throw new Error('No password rows found in the CSV');
+
+  const { added, skipped } = (await callOffscreen({
+    op: 'importEntries',
+    inputs: entries,
+  })) as { added: number; skipped: number };
+
+  if (added > 0) await persist();
+  armAutoLock();
+  return { imported: added, skipped, total: entries.length };
 }
 
 async function handleCapture(snapshot: CredentialSnapshot): Promise<PendingSuggestion | null> {

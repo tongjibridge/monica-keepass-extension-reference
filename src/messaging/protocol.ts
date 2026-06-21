@@ -79,6 +79,7 @@ export type BgRequest =
   | { type: 'vault.export' }
   | { type: 'vault.kdfInfo' }
   | { type: 'vault.setKdf'; profile: Exclude<KdfProfile, 'custom'> }
+  | { type: 'vault.importCsv'; csv: string }
   | { type: 'vault.capture'; snapshot: CredentialSnapshot }
   | { type: 'vault.applyPending'; entryId?: string }
   | { type: 'vault.dismissPending' }
@@ -127,6 +128,12 @@ export interface OneDriveStatus {
   sync: OneDriveSyncState | null;
 }
 
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  total: number;
+}
+
 export interface OneDriveSyncResult {
   action: 'connected' | 'configured' | 'disconnected' | 'pulled' | 'pushed' | 'synced' | 'merged' | 'conflict';
   message: string;
@@ -155,6 +162,7 @@ export interface BgResultMap {
   'vault.export': string;
   'vault.kdfInfo': KdfInfo;
   'vault.setKdf': KdfInfo;
+  'vault.importCsv': ImportResult;
   // Returns the resulting suggestion so the capturing tab can render an
   // in-page save/update prompt (null = nothing to suggest).
   'vault.capture': PendingSuggestion | null;
@@ -201,6 +209,7 @@ export type OffscreenOp =
   | { op: 'save' }
   | { op: 'kdfInfo' }
   | { op: 'setKdf'; profile: Exclude<KdfProfile, 'custom'> }
+  | { op: 'importEntries'; inputs: NewEntryInput[] }
   | { op: 'mergeRemote'; data: string; password: string | null; keyFile?: string };
 
 export interface OffscreenEnvelope {

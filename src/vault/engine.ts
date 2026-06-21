@@ -270,6 +270,42 @@ export const VaultEngine = {
     return summarize(entry);
   },
 
+  /**
+   * Bulk-add entries (e.g. from a browser CSV). Skips rows whose URL + username
+   * already exist so re-importing doesn't create duplicates. Does not save —
+   * the caller persists once.
+   */
+  addEntries(inputs: NewEntryInput[]): { added: number; skipped: number } {
+    const d = requireDb();
+    const group = d.getDefaultGroup();
+    const seen = new Set<string>();
+    const dedupKey = (url: string, username: string) =>
+      `${url.trim().toLowerCase().replace(/\/+$/, '')}|${username.trim().toLowerCase()}`;
+    for (const entry of walkEntries(group)) {
+      seen.add(dedupKey(fieldText(entry.fields.get('URL')), fieldText(entry.fields.get('UserName'))));
+    }
+
+    let added = 0;
+    let skipped = 0;
+    for (const input of inputs) {
+      const key = dedupKey(input.url, input.username);
+      if (seen.has(key)) {
+        skipped++;
+        continue;
+      }
+      seen.add(key);
+      const entry = d.createEntry(group);
+      entry.fields.set('Title', input.title);
+      entry.fields.set('UserName', input.username);
+      entry.fields.set('Password', ProtectedValue.fromString(input.password));
+      entry.fields.set('URL', input.url);
+      entry.fields.set('Notes', input.notes);
+      entry.times.update();
+      added++;
+    }
+    return { added, skipped };
+  },
+
   updateEntry(input: UpdateEntryInput): EntrySummary {
     const entry = findEntry(input.id);
     entry.pushHistory();

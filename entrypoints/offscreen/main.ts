@@ -42,6 +42,8 @@ async function handle(op: OffscreenOp): Promise<unknown> {
       return VaultEngine.getKdfInfo();
     case 'setKdf':
       return VaultEngine.setKdfProfile(op.profile);
+    case 'importEntries':
+      return VaultEngine.addEntries(op.inputs);
     case 'mergeRemote':
       return bytesToBase64(
         await VaultEngine.mergeRemote(

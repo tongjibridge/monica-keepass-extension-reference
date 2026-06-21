@@ -14,6 +14,7 @@ import {
 } from '@/src/autofill/suggest';
 import { backupFilenameFor, exportBackup, importBackup } from '@/src/backup/codec';
 import { argon2ComputeCount } from '@/src/crypto/argon2';
+import { csvToEntries, parseCsv } from '@/src/import/csv';
 
 let passed = 0;
 function assert(cond: boolean, msg: string) {
@@ -296,6 +297,53 @@ async function main() {
   );
 
   assert(/^monica-keepass-backup-\d{8}-\d{6}\.mkbackup$/.test(backupFilenameFor(new Date(2026, 4, 27, 18, 0, 0))), 'filename has timestamp');
+
+  // --- browser CSV import (parser + mapper) ---
+  // Quoted fields, comma inside a quoted password, escaped quote, CRLF.
+  const csvParsed = parseCsv(
+    'name,url,username,password,note\r\n' +
+      'GitHub,https://github.com,alice,"p,a""ss",hi\r\n' +
+      'Example,https://example.com,bob,secret,\r\n',
+  );
+  assert(csvParsed.length === 3, 'parseCsv returns header + 2 rows');
+  assert(csvParsed[1]![3] === 'p,a"ss', 'parseCsv handles comma + escaped quote in field');
+
+  const chrome = csvToEntries('name,url,username,password,note\nMy Site,https://site.com,u1,pw1,n1\n');
+  assert(chrome.entries.length === 1, 'Chrome CSV maps one entry');
+  assert(
+    chrome.entries[0]!.title === 'My Site' &&
+      chrome.entries[0]!.url === 'https://site.com' &&
+      chrome.entries[0]!.username === 'u1' &&
+      chrome.entries[0]!.password === 'pw1' &&
+      chrome.entries[0]!.notes === 'n1',
+    'Chrome CSV maps all columns',
+  );
+
+  // Firefox-style header (no name column) → title falls back to host.
+  const firefox = csvToEntries('"url","username","password"\n"https://www.mail.com/login","carol","pw2"\n');
+  assert(firefox.entries[0]!.title === 'mail.com', 'Firefox CSV falls back title to host (www stripped)');
+
+  await rejects(
+    async () => csvToEntries('foo,bar\n1,2\n'),
+    'CSV without username/password column is rejected',
+  );
+
+  // Bulk add + dedup through the engine, persisted and reopened.
+  await VaultEngine.open(reKeyed, PW);
+  const before = VaultEngine.listEntries().length;
+  const bulk = VaultEngine.addEntries([
+    { title: 'Bulk A', username: 'ba', password: 'p1', url: 'https://a.com', notes: '' },
+    { title: 'Bulk B', username: 'bb', password: 'p2', url: 'https://b.com', notes: '' },
+    { title: 'Bulk A dup', username: 'ba', password: 'p1', url: 'https://a.com/', notes: '' },
+  ]);
+  assert(bulk.added === 2 && bulk.skipped === 1, 'addEntries dedups URL+username (trailing slash ignored)');
+  assert(VaultEngine.listEntries().length === before + 2, 'two new entries present after bulk add');
+  const bulkSaved = await VaultEngine.save();
+  await VaultEngine.open(bulkSaved, PW);
+  assert(
+    VaultEngine.listEntries().some((e) => e.title === 'Bulk A'),
+    'bulk-added entries persist across save/open',
+  );
 
   console.log(`\nALL ${passed} HARNESS CHECKS PASSED`);
 }

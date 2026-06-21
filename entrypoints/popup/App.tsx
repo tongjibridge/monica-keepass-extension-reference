@@ -192,6 +192,11 @@ export function App() {
                 setView('locked');
               })
             }
+            onOneDriveSelected={async () => {
+              const s = await refreshStatus();
+              setView(s.unlocked ? 'list' : 'locked');
+            }}
+            setError={setError}
           />
         )}
 
@@ -363,14 +368,18 @@ function SetupView({
   onBack,
   onCreate,
   onImport,
+  onOneDriveSelected,
+  setError,
 }: {
   busy: boolean;
   canGoBack: boolean;
   onBack: () => void;
   onCreate: (name: string, password: string) => void;
   onImport: (name: string, dataB64: string) => void;
+  onOneDriveSelected: () => Promise<void>;
+  setError: (e: string) => void;
 }) {
-  const [mode, setMode] = useState<'create' | 'import'>('create');
+  const [mode, setMode] = useState<'create' | 'import' | 'onedrive'>('create');
   const [name, setName] = useState('My Vault');
   const [password, setPassword] = useState('');
 
@@ -382,14 +391,15 @@ function SetupView({
   return (
     <div className="grid gap-3">
       {canGoBack && <BackLink label="Back to unlock" onClick={onBack} />}
-      <Tabs value={mode} onValueChange={(v) => setMode(v as 'create' | 'import')}>
+      <Tabs value={mode} onValueChange={(v) => setMode(v as 'create' | 'import' | 'onedrive')}>
         <TabsList>
           <TabsTrigger value="create">Create</TabsTrigger>
-          <TabsTrigger value="import">Import .kdbx</TabsTrigger>
+          <TabsTrigger value="import">Import</TabsTrigger>
+          <TabsTrigger value="onedrive">OneDrive</TabsTrigger>
         </TabsList>
       </Tabs>
 
-      {mode === 'create' ? (
+      {mode === 'create' && (
         <>
           <Field label="Vault name">
             <Input value={name} onChange={(e) => setName(e.currentTarget.value)} />
@@ -401,7 +411,9 @@ function SetupView({
             Create vault
           </Button>
         </>
-      ) : (
+      )}
+
+      {mode === 'import' && (
         <>
           <p className="text-sm text-muted-foreground">
             Select an existing KeePass .kdbx file to manage in this browser.
@@ -409,6 +421,155 @@ function SetupView({
           <FileField accept=".kdbx" onFile={handleFile} />
         </>
       )}
+
+      {mode === 'onedrive' && (
+        <OneDriveVaultPicker onSelected={onOneDriveSelected} setError={setError} />
+      )}
+    </div>
+  );
+}
+
+// Connect to OneDrive and pick a .kdbx, usable before any vault exists (first
+// run). Reuses the same background handlers as Settings; on selection it pulls
+// the file locally so the caller can move to the unlock screen.
+function OneDriveVaultPicker({
+  onSelected,
+  setError,
+}: {
+  onSelected: () => Promise<void>;
+  setError: (e: string) => void;
+}) {
+  const [odStatus, setOdStatus] = useState<OneDriveStatus | null>(null);
+  const [clientId, setClientId] = useState(DEFAULT_ONEDRIVE_CLIENT_ID);
+  const [folder, setFolder] = useState('');
+  const [items, setItems] = useState<OneDriveListItem[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const loadFolder = async (path: string) => {
+    setFolder(path);
+    setItems(await callBackground({ type: 'onedrive.list', path }));
+  };
+
+  useEffect(() => {
+    callBackground({ type: 'onedrive.status' })
+      .then((s) => {
+        setOdStatus(s);
+        if (s.config?.clientId) setClientId(s.config.clientId);
+        if (s.connected) loadFolder('').catch((e) => setError(describeError(e)));
+      })
+      .catch((e) => setError(describeError(e)));
+  }, [setError]);
+
+  const run = async (fn: () => Promise<void>) => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const connect = () =>
+    run(async () => {
+      await callBackground({ type: 'onedrive.configure', clientId, remotePath: '' });
+      await callBackground({ type: 'onedrive.connect' });
+      setOdStatus(await callBackground({ type: 'onedrive.status' }));
+      await loadFolder('');
+    });
+
+  const pick = (item: OneDriveListItem) =>
+    run(async () => {
+      await callBackground({ type: 'onedrive.configure', clientId, remotePath: item.path });
+      await callBackground({ type: 'onedrive.pull' });
+      await onSelected();
+    });
+
+  const goUp = () =>
+    run(() => loadFolder(folder.split('/').slice(0, -1).join('/')));
+
+  if (!odStatus?.connected) {
+    return (
+      <div className="grid gap-3">
+        <p className="text-sm text-muted-foreground">
+          Connect OneDrive and pick a KeePass .kdbx to manage in this browser.
+        </p>
+        <Field
+          label="Microsoft client ID"
+          description="Use the default app registration or your own."
+        >
+          <Input value={clientId} onChange={(e) => setClientId(e.currentTarget.value)} />
+        </Field>
+        {odStatus?.redirectUrl && (
+          <p className="break-all text-xs text-muted-foreground">
+            Redirect URI: {odStatus.redirectUrl}
+          </p>
+        )}
+        <Button loading={busy} disabled={!clientId} onClick={connect}>
+          <IconCloud className="size-4" />
+          Connect OneDrive
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-2">
+      <p className="text-sm text-muted-foreground">Pick a .kdbx file to use.</p>
+      <Card className="grid gap-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="break-all text-xs text-muted-foreground">/{folder}</p>
+          <div className="flex items-center gap-1">
+            {folder && (
+              <Button size="xs" variant="outline" disabled={busy} onClick={goUp}>
+                Up
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="iconSm"
+              loading={busy}
+              onClick={() => run(() => loadFolder(folder))}
+            >
+              <IconRefresh className="size-4" />
+            </Button>
+          </div>
+        </div>
+        {items.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No folders or .kdbx files here.</p>
+        ) : (
+          <div className="grid gap-1">
+            {items.map((item) => (
+              <div key={item.id} className="flex items-center gap-2">
+                {item.isFolder ? (
+                  <IconFolder className="size-4 shrink-0 text-amber-500" />
+                ) : (
+                  <IconFile className="size-4 shrink-0 text-primary" />
+                )}
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 rounded px-1 py-0.5 text-left hover:bg-secondary"
+                  onClick={() =>
+                    item.isFolder
+                      ? run(() => loadFolder(item.path))
+                      : pick(item)
+                  }
+                >
+                  <p className="truncate text-sm">{item.name}</p>
+                </button>
+                {!item.isFolder && (
+                  <Button size="xs" variant="soft" loading={busy} onClick={() => pick(item)}>
+                    Use
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
@@ -704,6 +865,8 @@ function SettingsView({
   const [oneDriveMessage, setOneDriveMessage] = useState('');
   const [kdf, setKdf] = useState<KdfInfo | null>(null);
   const [kdfBusy, setKdfBusy] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importMsg, setImportMsg] = useState('');
 
   useEffect(() => {
     isHelloAvailable().then(setAvailable);
@@ -711,6 +874,26 @@ function SettingsView({
       .then(setKdf)
       .catch(() => setKdf(null));
   }, []);
+
+  const importCsvFile = async (file: File | null) => {
+    if (!file || importBusy) return;
+    setImportBusy(true);
+    setImportMsg('');
+    setError('');
+    try {
+      const csv = await file.text();
+      const result = await callBackground({ type: 'vault.importCsv', csv });
+      setImportMsg(
+        `Imported ${result.imported} of ${result.total}` +
+          (result.skipped ? `, skipped ${result.skipped} already present.` : '.'),
+      );
+      await onChanged();
+    } catch (e) {
+      setError(describeError(e));
+    } finally {
+      setImportBusy(false);
+    }
+  };
 
   const applyKdf = async (profile: 'fast' | 'balanced' | 'secure') => {
     if (kdfBusy) return;
@@ -909,6 +1092,23 @@ function SettingsView({
           </div>
         </>
       )}
+
+      <Separator />
+
+      <div className="grid gap-1.5">
+        <p className="text-sm font-semibold">Import passwords</p>
+        <p className="text-xs text-muted-foreground">
+          Import a CSV exported from Chrome, Edge or another browser. Existing
+          URL + username entries are skipped.
+        </p>
+        <FileField accept=".csv,text/csv" onFile={importCsvFile} />
+        {importBusy && <p className="text-xs text-muted-foreground">Importing…</p>}
+        {importMsg && (
+          <Alert variant="success">
+            <AlertDescription>{importMsg}</AlertDescription>
+          </Alert>
+        )}
+      </div>
 
       <Separator />
 
