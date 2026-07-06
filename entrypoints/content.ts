@@ -19,8 +19,19 @@ const USERNAME_SELECTOR =
   'input[type=text], input[type=email], input[type=tel], input:not([type])';
 const CONTROL_SIZE = 28;
 const CONTROL_GAP = 4;
-const CONTROL_INSET = 6;
-const PASSWORD_TRAILING_UI_WIDTH = 40;
+
+const CONTROL_DRAG_THRESHOLD = 4;
+const CONTROLS_OFFSET_STORAGE_KEY = 'monica.controls.offset';
+
+interface ControlsPosition {
+  left: number;
+  top: number;
+}
+
+interface ControlsOffset {
+  dx: number;
+  dy: number;
+}
 
 type ControlIcon = 'vault' | 'spark';
 
@@ -41,16 +52,133 @@ class Autofiller {
   private controls: HTMLDivElement | null = null;
   private activeField: HTMLInputElement | null = null;
   private controlField: HTMLInputElement | null = null;
-  private paddedField: HTMLInputElement | null = null;
-  private paddedFieldPaddingRight = '';
   private generator = new GeneratorPopover();
+  private dragState: {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originLeft: number;
+    originTop: number;
+    moved: boolean;
+  } | null = null;
 
   init() {
     document.addEventListener('focusin', this.onFocus, true);
     document.addEventListener('pointerdown', this.onDocPointerDown, true);
     window.addEventListener('scroll', this.updateControlsPosition, true);
-    window.addEventListener('resize', this.updateControlsPosition);
+    window.addEventListener('resize', this.onResize);
   }
+
+  private onResize = () => {
+    this.updateControlsPosition();
+  };
+
+  private offsetStorageKey(): string {
+    const path = location.pathname || '/';
+    return `${CONTROLS_OFFSET_STORAGE_KEY}.${location.origin}${path}`;
+  }
+
+  private loadOffset(): ControlsOffset | null {
+    try {
+      const raw = localStorage.getItem(this.offsetStorageKey());
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<ControlsOffset>;
+      if (typeof parsed.dx !== 'number' || typeof parsed.dy !== 'number') return null;
+      return { dx: parsed.dx, dy: parsed.dy };
+    } catch {
+      return null;
+    }
+  }
+
+  private saveOffset(offset: ControlsOffset) {
+    try {
+      localStorage.setItem(this.offsetStorageKey(), JSON.stringify(offset));
+    } catch {
+      // localStorage may be unavailable (private mode / sandbox); ignore.
+    }
+  }
+
+  private clampPosition(pos: ControlsPosition | null): ControlsPosition | null {
+    if (!pos) return null;
+    const margin = 4;
+    const width = this.controls?.offsetWidth || CONTROL_SIZE;
+    const height = this.controls?.offsetHeight || CONTROL_SIZE;
+    const viewLeft = margin;
+    const viewTop = margin;
+    const viewRight = window.innerWidth - margin;
+    const viewBottom = window.innerHeight - margin;
+    const left = clamp(pos.left, viewLeft, Math.max(viewLeft, viewRight - width));
+    const top = clamp(pos.top, viewTop, Math.max(viewTop, viewBottom - height));
+    return { left, top };
+  }
+
+  private applyPosition(pos: ControlsPosition) {
+    if (!this.controls) return;
+    this.controls.style.left = `${pos.left}px`;
+    this.controls.style.top = `${pos.top}px`;
+  }
+
+  private onControlsPointerDown = (e: PointerEvent) => {
+    if (!this.controls || e.button !== 0) return;
+    const rect = this.controls.getBoundingClientRect();
+    this.dragState = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      originLeft: rect.left,
+      originTop: rect.top,
+      moved: false,
+    };
+    document.addEventListener('pointermove', this.onControlsPointerMove, true);
+    document.addEventListener('pointerup', this.onControlsPointerUp, true);
+    document.addEventListener('pointercancel', this.onControlsPointerUp, true);
+  };
+
+  private onControlsPointerMove = (e: PointerEvent) => {
+    if (!this.dragState || e.pointerId !== this.dragState.pointerId) return;
+    const dx = e.clientX - this.dragState.startX;
+    const dy = e.clientY - this.dragState.startY;
+    if (!this.dragState.moved && Math.hypot(dx, dy) < CONTROL_DRAG_THRESHOLD) return;
+    if (!this.dragState.moved) {
+      this.dragState.moved = true;
+      document.body.style.userSelect = 'none';
+    }
+    e.preventDefault();
+    const next = this.clampPosition({
+      left: this.dragState.originLeft + dx,
+      top: this.dragState.originTop + dy,
+    });
+    if (next) this.applyPosition(next);
+  };
+
+  private onControlsPointerUp = (e: PointerEvent) => {
+    const state = this.dragState;
+    if (!state || e.pointerId !== state.pointerId) return;
+    this.dragState = null;
+    document.removeEventListener('pointermove', this.onControlsPointerMove, true);
+    document.removeEventListener('pointerup', this.onControlsPointerUp, true);
+    document.removeEventListener('pointercancel', this.onControlsPointerUp, true);
+    document.body.style.userSelect = '';
+    if (state.moved) {
+      const rect = this.controls?.getBoundingClientRect();
+      const base = this.defaultPositionForCurrentField();
+      if (rect && base) {
+        this.saveOffset({
+          dx: rect.left - base.left,
+          dy: rect.top - base.top,
+        });
+      }
+      // Suppress the click that follows a drag so buttons don't fire.
+      this.controls?.addEventListener(
+        'click',
+        (ev: Event) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+        },
+        { capture: true, once: true },
+      );
+    }
+  };
 
   private onFocus = (e: Event) => {
     const el = e.target as HTMLElement;
@@ -80,12 +208,13 @@ class Autofiller {
       const controls = document.createElement('div');
       controls.setAttribute('data-monica-autofill-controls', '');
       Object.assign(controls.style, {
-        position: 'absolute',
+        position: 'fixed',
         display: 'flex',
         gap: `${CONTROL_GAP}px`,
         zIndex: '2147483647',
         font: '13px system-ui, sans-serif',
       } satisfies Partial<CSSStyleDeclaration>);
+      controls.addEventListener('pointerdown', this.onControlsPointerDown);
 
       const fillButton = this.createControlButton('vault', 'Search Monica KeePass accounts');
       fillButton.addEventListener('click', (ev) => {
@@ -166,48 +295,37 @@ class Autofiller {
       return;
     }
 
-    const rect = field.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
+    const next = this.positionForCurrentField();
+    if (!next) {
       this.closeControls();
       return;
     }
 
-    const controlsWidth = this.controls.offsetWidth || CONTROL_SIZE;
-    const outsideLeft = rect.right + window.scrollX + CONTROL_GAP;
-    const outsideFits = rect.right + controlsWidth + CONTROL_GAP + 8 <= window.innerWidth;
-    const rightInset = field.type === 'password' ? PASSWORD_TRAILING_UI_WIDTH : CONTROL_INSET;
-    const insideLeft = rect.right + window.scrollX - controlsWidth - rightInset;
-    const left = outsideFits ? outsideLeft : insideLeft;
-    const top = rect.top + window.scrollY + Math.max((rect.height - CONTROL_SIZE) / 2, 0);
-
-    if (outsideFits) {
-      this.restoreFieldPadding();
-    } else {
-      this.reserveFieldPadding(field, controlsWidth, rightInset);
-    }
-
-    this.controls.style.left = `${Math.max(window.scrollX + 4, left)}px`;
-    this.controls.style.top = `${top}px`;
+    this.applyPosition(next);
   };
 
-  private reserveFieldPadding(field: HTMLInputElement, controlsWidth: number, rightInset: number) {
-    if (this.paddedField !== field) {
-      this.restoreFieldPadding();
-      this.paddedField = field;
-      this.paddedFieldPaddingRight = field.style.paddingRight;
-    }
+  private defaultPositionForCurrentField(): ControlsPosition | null {
+    const field = this.controlField;
+    if (!this.controls || !field || !document.contains(field)) return null;
+    const rect = field.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
 
-    const currentPadding = Number.parseFloat(window.getComputedStyle(field).paddingRight) || 0;
-    const requiredPadding = Math.ceil(controlsWidth + rightInset + CONTROL_INSET + CONTROL_GAP);
-    if (currentPadding >= requiredPadding) return;
-    field.style.paddingRight = `${requiredPadding}px`;
+    // Default placement: just to the right of the field, vertically centred.
+    // (position:fixed means coordinates are viewport-relative, no scroll offset.)
+    const controlsHeight = this.controls.offsetHeight || CONTROL_SIZE;
+    const left = rect.right + CONTROL_GAP;
+    const top = rect.top + Math.max((rect.height - controlsHeight) / 2, 0);
+    return { left, top };
   }
 
-  private restoreFieldPadding() {
-    if (!this.paddedField) return;
-    this.paddedField.style.paddingRight = this.paddedFieldPaddingRight;
-    this.paddedField = null;
-    this.paddedFieldPaddingRight = '';
+  private positionForCurrentField(): ControlsPosition | null {
+    const base = this.defaultPositionForCurrentField();
+    if (!base) return null;
+    const offset = this.loadOffset();
+    const next = offset
+      ? { left: base.left + offset.dx, top: base.top + offset.dy }
+      : base;
+    return this.clampPosition(next) ?? next;
   }
 
   private async showAccountPicker(field: HTMLInputElement) {
@@ -351,7 +469,6 @@ class Autofiller {
   }
 
   private closeControls() {
-    this.restoreFieldPadding();
     this.controls?.remove();
     this.controls = null;
     this.controlField = null;
@@ -838,4 +955,3 @@ function controlIconSvg(icon: ControlIcon): string {
     </svg>
   `;
 }
-

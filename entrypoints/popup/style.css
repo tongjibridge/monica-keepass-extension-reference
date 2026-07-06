@@ -6,25 +6,25 @@
 
 /* shadcn/ui design tokens — light theme, indigo primary. */
 :root {
-  --background: #f4f5f7;
-  --foreground: #1f2329;
+  --background: #fdfcfc;
+  --foreground: #1f1f1f;
   --card: #ffffff;
-  --card-foreground: #1f2329;
+  --card-foreground: #1f1f1f;
   --popover: #ffffff;
-  --popover-foreground: #1f2329;
-  --primary: #4f46e5;
-  --primary-foreground: #ffffff;
-  --secondary: #eef0f3;
-  --secondary-foreground: #1f2329;
-  --muted: #eef0f3;
-  --muted-foreground: #6b7280;
-  --accent: #eef2ff;
-  --accent-foreground: #3730a3;
-  --destructive: #dc2626;
-  --border: #e3e6eb;
-  --input: #e3e6eb;
-  --ring: #4f46e5;
-  --radius: 0.625rem;
+  --popover-foreground: #1f1f1f;
+  --primary: #c2e7ff;
+  --primary-foreground: #004a77;
+  --secondary: #f1f3f4;
+  --secondary-foreground: #444746;
+  --muted: #f1f3f4;
+  --muted-foreground: #5f6368;
+  --accent: #eaf4ff;
+  --accent-foreground: #0b57d0;
+  --destructive: #b3261e;
+  --border: #e8eaed;
+  --input: #e8eaed;
+  --ring: #9dd2ff;
+  --radius: 1rem;
 }
 
 @theme inline {
@@ -66,6 +66,21 @@
   }
 }
 
+@keyframes monica-unlock-ring {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.monica-unlock-ring {
+  width: 38px;
+  height: 38px;
+  border: 3px solid color-mix(in srgb, var(--primary) 18%, transparent);
+  border-top-color: var(--primary);
+  border-radius: 999px;
+  animation: monica-unlock-ring 0.9s linear infinite;
+}
+
 @layer utilities {
   .animate-in {
     animation: var(--animate-in);
@@ -97,7 +112,7 @@ body {
 }
 
 body {
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'Google Sans Flex', 'Google Sans Text', 'Google Sans', 'Noto Sans SC', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 

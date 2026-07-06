@@ -2,14 +2,14 @@ import * as React from 'react';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '@/src/lib/utils';
 
-const alertVariants = cva('relative w-full rounded-lg border px-3.5 py-3 text-sm', {
+const alertVariants = cva('relative w-full rounded-2xl border px-4 py-3 text-sm', {
   variants: {
     variant: {
       default: 'border-border bg-card text-foreground',
-      destructive: 'border-destructive/30 bg-destructive/8 text-destructive',
-      info: 'border-primary/25 bg-accent text-accent-foreground',
-      success: 'border-emerald-300/60 bg-emerald-50 text-emerald-900',
-      warning: 'border-amber-300/70 bg-amber-50 text-amber-900',
+      destructive: 'border-destructive/25 bg-destructive/8 text-destructive',
+      info: 'border-primary/30 bg-accent text-accent-foreground',
+      success: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+      warning: 'border-amber-200 bg-amber-50 text-amber-900',
     },
   },
   defaultVariants: {
@@ -45,7 +45,7 @@ const Alert = React.forwardRef<HTMLDivElement, AlertProps>(
 Alert.displayName = 'Alert';
 
 function AlertTitle({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('mb-1 font-semibold leading-none', className)} {...props} />;
+  return <div className={cn('mb-1 font-medium leading-none', className)} {...props} />;
 }
 
 function AlertDescription({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {

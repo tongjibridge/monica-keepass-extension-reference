@@ -59,6 +59,10 @@ function describeError(e: unknown): string {
   return String(e);
 }
 
+function waitForPaint(): Promise<void> {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 export function App() {
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [view, setView] = useState<View>('loading');
@@ -92,6 +96,7 @@ export function App() {
   const run = useCallback(async (fn: () => Promise<void>) => {
     setBusy(true);
     setError('');
+    await waitForPaint();
     try {
       await fn();
     } catch (e) {
@@ -113,10 +118,10 @@ export function App() {
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background text-foreground">
-      <header className="sticky top-0 z-10 flex min-w-0 items-center justify-between gap-3 border-b border-border bg-card px-4 py-2.5">
+      <header className="sticky top-0 z-10 flex h-14 min-w-0 items-center justify-between gap-3 bg-background/95 px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
-          <img src="/icons/icon-32.png" alt="" className="size-6" />
-          <h1 className="truncate text-[15px] font-semibold tracking-tight">Monica KeePass</h1>
+          <img src="/icons/icon-32.png" alt="" className="size-7" />
+          <h1 className="truncate text-[18px] font-medium tracking-[-0.3px]">Monica KeePass</h1>
         </div>
         {status?.unlocked && (
           <div className="shrink-0 flex items-center gap-0.5">
@@ -139,7 +144,7 @@ export function App() {
         )}
       </header>
 
-      <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-4">
+      <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-4 pb-4 pt-3">
         {error && (
           <Alert variant="destructive" className="mb-4" onClose={() => setError('')}>
             <AlertDescription>{error}</AlertDescription>
@@ -326,6 +331,22 @@ export function App() {
           />
         )}
       </main>
+
+      {view === 'locked' && busy && <UnlockingOverlay />}
+    </div>
+  );
+}
+
+function UnlockingOverlay() {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 px-6 backdrop-blur-sm" aria-live="polite">
+      <div className="grid w-full max-w-[280px] place-items-center gap-3 rounded-[24px] border border-border bg-card p-5 text-center shadow-[0_8px_24px_rgba(60,64,67,0.14)]">
+        <div className="monica-unlock-ring" aria-hidden="true" />
+        <div className="grid gap-1">
+          <p className="text-sm font-medium">Unlocking vault</p>
+          <p className="text-xs text-muted-foreground">Please wait while Monica KeePass decrypts your vault.</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -394,7 +415,7 @@ function SetupView({
       <Tabs value={mode} onValueChange={(v) => setMode(v as 'create' | 'import' | 'onedrive')}>
         <TabsList>
           <TabsTrigger value="create">Create</TabsTrigger>
-          <TabsTrigger value="import">Import</TabsTrigger>
+          <TabsTrigger value="import">导入</TabsTrigger>
           <TabsTrigger value="onedrive">OneDrive</TabsTrigger>
         </TabsList>
       </Tabs>
@@ -499,13 +520,13 @@ function OneDriveVaultPicker({
         </p>
         <Field
           label="Microsoft client ID"
-          description="Use the default app registration or your own."
+          description="使用 the default app registration or your own."
         >
           <Input value={clientId} onChange={(e) => setClientId(e.currentTarget.value)} />
         </Field>
         {odStatus?.redirectUrl && (
           <p className="break-all text-xs text-muted-foreground">
-            Redirect URI: {odStatus.redirectUrl}
+            重定向 URI： {odStatus.redirectUrl}
           </p>
         )}
         <Button loading={busy} disabled={!clientId} onClick={connect}>
@@ -539,7 +560,7 @@ function OneDriveVaultPicker({
           </div>
         </div>
         {items.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No folders or .kdbx files here.</p>
+          <p className="text-xs text-muted-foreground">这里没有文件夹或 .kdbx 文件。</p>
         ) : (
           <div className="grid gap-1">
             {items.map((item) => (
@@ -558,7 +579,7 @@ function OneDriveVaultPicker({
                       : pick(item)
                   }
                 >
-                  <p className="truncate text-sm">{item.name}</p>
+                  <p className="max-w-[220px] truncate text-sm">{item.name}</p>
                 </button>
                 {!item.isFolder && (
                   <Button size="xs" variant="soft" loading={busy} onClick={() => pick(item)}>
@@ -617,7 +638,7 @@ function LockedView({
       {status.rememberedKeyFile && !keyFileB64 ? (
         <p className="text-sm text-muted-foreground">Using remembered key file on this device.</p>
       ) : (
-        <FileField label="Key file (optional)" onFile={pickKeyFile} />
+        <FileField label="密钥文件（可选）" onFile={pickKeyFile} />
       )}
       {keyFileB64 && (
         <CheckboxField
@@ -693,10 +714,10 @@ function ListView({
             <button
               key={e.id}
               type="button"
-              className="max-w-full overflow-hidden rounded-xl border border-border bg-card p-3 text-left shadow-sm transition-colors hover:border-primary/40 hover:bg-accent/40"
+              className="max-w-full overflow-hidden rounded-2xl border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/60 hover:bg-accent/60"
               onClick={() => onOpen(e.id)}
             >
-              <p className="truncate text-sm font-semibold">{e.title || '(untitled)'}</p>
+              <p className="truncate text-[15px] font-medium">{e.title || '(untitled)'}</p>
               <p className="truncate text-xs text-muted-foreground">{e.username || e.url}</p>
             </button>
           ))}
@@ -734,8 +755,8 @@ function DetailView({
 }) {
   return (
     <div className="grid gap-3">
-      <BackLink label="Back" onClick={onBack} />
-      <h2 className="text-lg font-semibold">{entry.title || '(untitled)'}</h2>
+      <BackLink label="返回" onClick={onBack} />
+      <h2 className="text-lg font-medium tracking-[-0.2px]">{entry.title || '(untitled)'}</h2>
 
       <CopyRow label="Username" value={entry.username} />
 
@@ -1032,7 +1053,7 @@ function SettingsView({
         remotePath: item.path,
       });
       const result = await callBackground({ type: 'onedrive.pull' });
-      return `${item.name} selected. ${result.message}`;
+      return `已选择 ${item.name}。${result.message}`;
     });
 
   const goUpOneDriveFolder = () => {
@@ -1046,27 +1067,27 @@ function SettingsView({
   return (
     <div className="grid gap-3">
       <BackLink label="Back" onClick={onBack} />
-      <h2 className="text-lg font-semibold">Settings</h2>
+      <h2 className="text-lg font-medium">设置</h2>
 
       <div>
-        <p className="text-xs text-muted-foreground">Vault</p>
+        <p className="text-xs text-muted-foreground">密码库</p>
         <p className="text-sm">
-          {status.meta?.name} · {status.meta?.entryCount} entries
+          {status.meta?.name} · {status.meta?.entryCount} 个条目
         </p>
       </div>
 
       <Separator />
 
       <div className="grid gap-1.5">
-        <p className="text-sm font-semibold">Windows Hello</p>
+        <p className="text-sm font-medium">Windows Hello</p>
         {available === false && (
           <p className="text-xs text-muted-foreground">
-            No platform authenticator available on this device.
+            此设备没有可用的平台认证器。
           </p>
         )}
         {status.helloEnrolled ? (
           <Button variant="softDestructive" className="w-fit" loading={helloBusy} onClick={disable}>
-            Disable Windows Hello
+            停用 Windows Hello
           </Button>
         ) : (
           <Button
@@ -1076,7 +1097,7 @@ function SettingsView({
             onClick={enable}
           >
             <IconFingerprint className="size-4.5" />
-            Enable Windows Hello
+            启用 Windows Hello
           </Button>
         )}
       </div>
@@ -1085,9 +1106,9 @@ function SettingsView({
         <>
           <Separator />
           <div className="grid gap-1.5">
-            <p className="text-sm font-semibold">Key file</p>
+            <p className="text-sm font-medium">密钥文件</p>
             <Button variant="softDestructive" className="w-fit" onClick={forgetKeyFile}>
-              Forget remembered key file
+              忘记已记住的密钥文件
             </Button>
           </div>
         </>
@@ -1096,13 +1117,13 @@ function SettingsView({
       <Separator />
 
       <div className="grid gap-1.5">
-        <p className="text-sm font-semibold">Import passwords</p>
+        <p className="text-sm font-medium">导入密码</p>
         <p className="text-xs text-muted-foreground">
-          Import a CSV exported from Chrome, Edge or another browser. Existing
-          URL + username entries are skipped.
+          导入从 Chrome、Edge 或其他浏览器导出的 CSV。已有的
+          URL + 用户名条目会自动跳过。
         </p>
         <FileField accept=".csv,text/csv" onFile={importCsvFile} />
-        {importBusy && <p className="text-xs text-muted-foreground">Importing…</p>}
+        {importBusy && <p className="text-xs text-muted-foreground">正在导入...</p>}
         {importMsg && (
           <Alert variant="success">
             <AlertDescription>{importMsg}</AlertDescription>
@@ -1113,14 +1134,14 @@ function SettingsView({
       <Separator />
 
       <div className="grid gap-1.5">
-        <p className="text-sm font-semibold">Encryption strength</p>
+        <p className="text-sm font-medium">加密强度</p>
         <p className="text-xs text-muted-foreground">
-          Higher strength resists brute-force better but makes unlocking and saving slower.
+          强度越高，抗暴力破解越强，但解锁和保存会更慢。
           {kdf && (
             <>
               {' '}
-              Current: {kdf.kdf === 'aes' ? 'AES-KDF' : kdf.kdf}, {kdf.memoryKiB} KiB · {kdf.iterations}{' '}
-              iter.
+              当前：{kdf.kdf === 'aes' ? 'AES-KDF' : kdf.kdf}，{kdf.memoryKiB} KiB · {kdf.iterations}{' '}
+              次迭代。
             </>
           )}
         </p>
@@ -1133,26 +1154,26 @@ function SettingsView({
               loading={kdfBusy}
               onClick={() => applyKdf(p)}
             >
-              {p === 'fast' ? 'Fast' : p === 'balanced' ? 'Balanced' : 'Secure'}
+              {p === 'fast' ? '快速' : p === 'balanced' ? '均衡' : '安全'}
             </Button>
           ))}
         </div>
         <p className="text-xs text-muted-foreground">
-          Fast ≈ 19 MiB · Balanced ≈ 64 MiB · Secure ≈ 256 MiB. Re-encrypts the vault once; unlock
-          speed changes next time.
+          快速 ≈ 19 MiB · 均衡 ≈ 64 MiB · 安全 ≈ 256 MiB。会重新加密一次密码库；
+          下次解锁开始生效。
         </p>
       </div>
 
       <Separator />
 
       <div className="grid gap-1.5">
-        <p className="text-sm font-semibold">Backup &amp; Restore</p>
+        <p className="text-sm font-medium">备份与恢复</p>
         <p className="text-xs text-muted-foreground">
-          Pack all extension data into a single encrypted file for migration to another device.
+          将扩展数据打包成单个加密文件，方便迁移到其他设备。
         </p>
         <Button variant="soft" className="w-fit" onClick={onOpenBackup}>
           <IconDownload className="size-4" />
-          Open backup &amp; restore
+          打开备份与恢复
         </Button>
       </div>
 
@@ -1161,16 +1182,16 @@ function SettingsView({
       <div className="grid gap-2">
         <div className="flex items-center gap-1.5">
           <IconCloud className="size-4.5" />
-          <p className="text-sm font-semibold">OneDrive</p>
+          <p className="text-sm font-medium">OneDrive</p>
         </div>
         {oneDriveMessage && (
           <Alert variant="success">
             <AlertDescription>{oneDriveMessage}</AlertDescription>
           </Alert>
         )}
-        <Field label="Selected OneDrive vault">
+        <Field label="已选择的 OneDrive 密码库">
           <Input
-            placeholder="Connect and choose a .kdbx file"
+            placeholder="连接并选择 .kdbx 文件"
             value={oneDriveRemotePath}
             onChange={(e) => setOneDriveRemotePath(e.currentTarget.value)}
           />
@@ -1182,7 +1203,7 @@ function SettingsView({
         )}
         {oneDrive?.sync?.lastSuccessAt && (
           <p className="text-xs text-muted-foreground">
-            Last synced {new Date(oneDrive.sync.lastSuccessAt).toLocaleString()}
+            上次同步：{new Date(oneDrive.sync.lastSuccessAt).toLocaleString()}
           </p>
         )}
         {oneDrive?.sync?.failureMessage && (
@@ -1195,14 +1216,14 @@ function SettingsView({
             disabled={!oneDriveRemotePath}
             onClick={saveOneDriveConfig}
           >
-            Save path
+            保存路径
           </Button>
           <Button loading={oneDriveBusy} onClick={connectOneDrive}>
-            {oneDrive?.connected ? 'Reconnect' : 'Connect'}
+            {oneDrive?.connected ? '重新连接' : '连接'}
           </Button>
           {oneDrive?.connected && (
             <Button variant="softDestructive" loading={oneDriveBusy} onClick={disconnectOneDrive}>
-              Disconnect
+              断开连接
             </Button>
           )}
         </div>
@@ -1248,7 +1269,7 @@ function SettingsView({
                           : selectOneDriveVault(item)
                       }
                     >
-                      <p className="truncate text-sm">{item.name}</p>
+                      <p className="max-w-[220px] truncate text-sm">{item.name}</p>
                       {!item.isFolder && item.lastModified && (
                         <p className="text-xs text-muted-foreground">
                           {new Date(item.lastModified).toLocaleDateString()}
@@ -1274,7 +1295,7 @@ function SettingsView({
             onClick={() => oneDriveAction('onedrive.pull')}
           >
             <IconDownload className="size-4" />
-            Pull
+            拉取
           </Button>
           <Button
             variant="soft"
@@ -1283,7 +1304,7 @@ function SettingsView({
             onClick={() => oneDriveAction('onedrive.push')}
           >
             <IconUpload className="size-4" />
-            Push
+            推送
           </Button>
           <Button
             loading={oneDriveBusy}
@@ -1291,7 +1312,7 @@ function SettingsView({
             onClick={() => oneDriveAction('onedrive.sync')}
           >
             <IconRefresh className="size-4" />
-            Sync
+            同步
           </Button>
         </div>
       </div>
@@ -1314,11 +1335,11 @@ function PendingBanner({
   if (!pending) return null;
 
   const isSave = pending.action === 'save';
-  const title = isSave ? 'Save credentials?' : 'Update saved password?';
-  const account = pending.username || '(no username)';
+  const title = isSave ? '保存凭据？' : '更新已保存的密码？';
+  const account = pending.username || '(无用户名)';
   const description = isSave
-    ? `Save ${account} on ${pending.origin} into Monica KeePass.`
-    : `Replace the password for "${pending.entryTitle || account}" on ${pending.origin}.`;
+    ? `将 ${pending.origin} 上的 ${account} 保存到 Monica KeePass。`
+    : `替换 ${pending.origin} 上 "${pending.entryTitle || account}" 的密码。`;
 
   return (
     <Alert variant="info" className="mb-4">
@@ -1328,11 +1349,11 @@ function PendingBanner({
           <AlertTitle>{title}</AlertTitle>
           <AlertDescription>{description}</AlertDescription>
           {!status.unlocked && (
-            <p className="text-xs text-muted-foreground">Unlock the vault to save.</p>
+            <p className="text-xs text-muted-foreground">解锁密码库后才能保存。</p>
           )}
           <div className="flex gap-2">
             <Button size="xs" disabled={busy || !status.unlocked} onClick={() => onApply()}>
-              {isSave ? 'Save' : 'Update'}
+              {isSave ? '保存' : '更新'}
             </Button>
             <Button size="xs" variant="outline" disabled={busy} onClick={onDismiss}>
               Dismiss
@@ -1428,7 +1449,7 @@ function BackupView({
         credential: credentialPayload(),
       });
       triggerDownload(result.data, result.suggestedName);
-      return `Downloaded ${result.suggestedName}.`;
+      return `已下载 ${result.suggestedName}。`;
     });
 
   const exportOneDrive = () =>
@@ -1443,55 +1464,55 @@ function BackupView({
 
   const importLocal = () =>
     run(async () => {
-      if (!importFileB64) throw new Error('Select a backup file first');
+      if (!importFileB64) throw new Error('请先选择备份文件');
       await callBackground({
         type: 'backup.importLocal',
         data: importFileB64,
         credential: credentialPayload(),
       });
       await onAfterImport();
-      return 'Backup restored. Re-enable Windows Hello and reconnect OneDrive if you used them.';
+      return '备份已恢复。如需继续使用 Windows Hello 或 OneDrive，请重新启用/连接。';
     });
 
   const importOneDrive = () =>
     run(async () => {
-      if (!oneDrivePath.trim()) throw new Error('Enter the OneDrive backup file path');
+      if (!oneDrivePath.trim()) throw new Error('请输入 OneDrive 备份文件路径');
       await callBackground({
         type: 'backup.importFromOneDrive',
         path: oneDrivePath.trim(),
         credential: credentialPayload(),
       });
       await onAfterImport();
-      return 'Backup restored from OneDrive. Re-enable Windows Hello and reconnect OneDrive if you used them.';
+      return '已从 OneDrive 恢复备份。如需继续使用 Windows Hello 或 OneDrive，请重新启用/连接。';
     });
 
   return (
     <div className="grid gap-3">
-      <BackLink label="Back to settings" onClick={onBack} />
-      <h2 className="text-lg font-semibold">Backup &amp; Restore</h2>
+      <BackLink label="返回设置" onClick={onBack} />
+      <h2 className="text-lg font-medium">备份与恢复</h2>
 
       <p className="text-xs text-muted-foreground">
-        The vault, remembered key file and OneDrive configuration are packed into a single
-        encrypted .mkbackup file. Hello enrollment and OneDrive token stay on this device.
+        密码库、已记住的密钥文件和 OneDrive 配置会打包成一个加密的
+        .mkbackup 文件。Windows Hello 注册信息和 OneDrive token 不会离开此设备。
       </p>
 
       <Tabs value={direction} onValueChange={(v) => setDirection(v as 'export' | 'import')}>
         <TabsList>
-          <TabsTrigger value="export">Export</TabsTrigger>
+          <TabsTrigger value="export">导出</TabsTrigger>
           <TabsTrigger value="import">Import</TabsTrigger>
         </TabsList>
       </Tabs>
 
       <Tabs value={destination} onValueChange={(v) => setDestination(v as 'local' | 'onedrive')}>
         <TabsList>
-          <TabsTrigger value="local">Local file</TabsTrigger>
+          <TabsTrigger value="local">本地文件</TabsTrigger>
           <TabsTrigger value="onedrive">OneDrive</TabsTrigger>
         </TabsList>
       </Tabs>
 
       <Field
-        label="Backup password"
-        description="Encrypts the bundle. Independent of the vault master password."
+        label="备份密码"
+        description="用于加密备份包，独立于密码库主密码。"
       >
         <PasswordInput value={password} onChange={(e) => setPassword(e.currentTarget.value)} />
       </Field>
@@ -1499,7 +1520,7 @@ function BackupView({
 
       {direction === 'import' && destination === 'local' && (
         <FileField
-          label="Backup file"
+          label="备份文件"
           accept=".mkbackup,application/octet-stream"
           onFile={pickImportFile}
         />
@@ -1507,10 +1528,10 @@ function BackupView({
 
       {destination === 'onedrive' && (
         <Field
-          label={direction === 'export' ? 'OneDrive path (optional)' : 'OneDrive backup file path'}
+          label={direction === 'export' ? 'OneDrive 路径（可选）' : 'OneDrive 备份文件路径'}
           description={
             direction === 'export'
-              ? 'Defaults to the vault folder with a timestamped name.'
+              ? '默认保存到密码库所在文件夹，并使用带时间戳的文件名。'
               : undefined
           }
         >
@@ -1524,15 +1545,14 @@ function BackupView({
 
       {direction === 'import' && (
         <Alert variant="warning">
-          <AlertTitle>This replaces all extension data on this device</AlertTitle>
+          <AlertTitle>这会替换此设备上的全部扩展数据</AlertTitle>
           <AlertDescription>
             <p className="mb-2 text-xs">
-              Current vault, remembered key file and OneDrive settings will be overwritten with
-              whatever the backup contains. Windows Hello enrollment and any OneDrive session on
-              this device are cleared.
+              当前密码库、已记住的密钥文件和 OneDrive 设置会被备份内容覆盖。
+              此设备上的 Windows Hello 注册信息和 OneDrive 会话也会被清除。
             </p>
             <CheckboxField
-              label="I understand, continue"
+              label="我已了解，继续"
               checked={confirmImport}
               onCheckedChange={setConfirmImport}
             />
@@ -1542,7 +1562,7 @@ function BackupView({
 
       {direction === 'export' && cannotExport && (
         <Alert variant="warning">
-          <AlertDescription>Import or create a vault before exporting a backup.</AlertDescription>
+          <AlertDescription>请先导入或创建密码库，再导出备份。</AlertDescription>
         </Alert>
       )}
 
@@ -1556,13 +1576,13 @@ function BackupView({
         {direction === 'export' && destination === 'local' && (
           <Button loading={busy} disabled={!hasCred || cannotExport} onClick={exportLocal}>
             <IconDownload className="size-4" />
-            Download backup
+            下载备份
           </Button>
         )}
         {direction === 'export' && destination === 'onedrive' && (
           <Button loading={busy} disabled={!hasCred || cannotExport} onClick={exportOneDrive}>
             <IconCloud className="size-4" />
-            Upload to OneDrive
+            上传到 OneDrive
           </Button>
         )}
         {direction === 'import' && destination === 'local' && (
@@ -1572,7 +1592,7 @@ function BackupView({
             disabled={!hasCred || !importFileB64 || !confirmImport}
             onClick={importLocal}
           >
-            Restore from file
+            从文件恢复
           </Button>
         )}
         {direction === 'import' && destination === 'onedrive' && (
@@ -1582,7 +1602,7 @@ function BackupView({
             disabled={!hasCred || !oneDrivePath.trim() || !confirmImport}
             onClick={importOneDrive}
           >
-            Restore from OneDrive
+            从 OneDrive 恢复
           </Button>
         )}
       </div>

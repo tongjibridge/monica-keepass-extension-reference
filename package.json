@@ -1,6 +1,6 @@
 {
   "name": "monica-keepass-extension",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Monica KeePass browser extension: Windows Hello unlock, autofill, password generation, OneDrive backup",
   "type": "module",
   "scripts": {

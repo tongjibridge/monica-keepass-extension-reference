@@ -7,12 +7,12 @@ const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLI
       ref={ref}
       type={type}
       className={cn(
-        'flex h-9 w-full min-w-0 rounded-lg border border-border bg-card px-3 py-1 text-sm shadow-sm transition-colors',
+        'flex h-11 w-full min-w-0 rounded-[24px] border border-transparent bg-secondary/80 px-4 py-1 text-sm transition-colors',
         'placeholder:text-muted-foreground',
-        'focus-visible:outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30',
+        'focus-visible:outline-none focus-visible:border-ring focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-ring/60',
         'disabled:cursor-not-allowed disabled:opacity-50',
-        'file:me-2 file:h-full file:cursor-pointer file:rounded-md file:border-0 file:bg-secondary file:px-2 file:py-0.5 file:text-xs file:font-medium file:text-secondary-foreground',
-        type === 'file' && 'cursor-pointer pt-1.5',
+        'file:me-2 file:h-8 file:cursor-pointer file:rounded-full file:border-0 file:bg-card file:px-3 file:py-0.5 file:text-xs file:font-medium file:text-secondary-foreground',
+        type === 'file' && 'cursor-pointer py-1.5',
         className,
       )}
       {...props}

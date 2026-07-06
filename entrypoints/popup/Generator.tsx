@@ -55,7 +55,7 @@ export function Generator({ onUse }: { onUse?: (password: string) => void }) {
 
   return (
     <div className="grid gap-3">
-      <pre className="min-h-11 break-all whitespace-pre-wrap rounded-lg border border-border bg-secondary px-3 py-2.5 font-mono text-sm">
+      <pre className="min-h-14 break-all whitespace-pre-wrap rounded-2xl border border-border bg-secondary/80 px-4 py-3 font-mono text-sm">
         {value || '—'}
       </pre>
       <Progress value={STRENGTH_VALUE[strength] ?? 0} indicatorClassName={STRENGTH_BAR[strength]} />

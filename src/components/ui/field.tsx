@@ -18,7 +18,7 @@ export function Field({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn('grid gap-1.5', className)}>
+    <div className={cn('grid gap-2', className)}>
       {label && <Label>{label}</Label>}
       {children}
       {description && <p className="text-xs text-muted-foreground">{description}</p>}
