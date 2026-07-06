@@ -19,6 +19,8 @@ const USERNAME_SELECTOR =
   'input[type=text], input[type=email], input[type=tel], input:not([type])';
 const CONTROL_SIZE = 28;
 const CONTROL_GAP = 4;
+const CONTROL_INSET = 6;
+const PASSWORD_TRAILING_UI_WIDTH = 40;
 
 type ControlIcon = 'vault' | 'spark';
 
@@ -39,6 +41,8 @@ class Autofiller {
   private controls: HTMLDivElement | null = null;
   private activeField: HTMLInputElement | null = null;
   private controlField: HTMLInputElement | null = null;
+  private paddedField: HTMLInputElement | null = null;
+  private paddedFieldPaddingRight = '';
   private generator = new GeneratorPopover();
 
   init() {
@@ -171,14 +175,40 @@ class Autofiller {
     const controlsWidth = this.controls.offsetWidth || CONTROL_SIZE;
     const outsideLeft = rect.right + window.scrollX + CONTROL_GAP;
     const outsideFits = rect.right + controlsWidth + CONTROL_GAP + 8 <= window.innerWidth;
-    const left = outsideFits
-      ? outsideLeft
-      : rect.right + window.scrollX - controlsWidth - CONTROL_GAP;
+    const rightInset = field.type === 'password' ? PASSWORD_TRAILING_UI_WIDTH : CONTROL_INSET;
+    const insideLeft = rect.right + window.scrollX - controlsWidth - rightInset;
+    const left = outsideFits ? outsideLeft : insideLeft;
     const top = rect.top + window.scrollY + Math.max((rect.height - CONTROL_SIZE) / 2, 0);
+
+    if (outsideFits) {
+      this.restoreFieldPadding();
+    } else {
+      this.reserveFieldPadding(field, controlsWidth, rightInset);
+    }
 
     this.controls.style.left = `${Math.max(window.scrollX + 4, left)}px`;
     this.controls.style.top = `${top}px`;
   };
+
+  private reserveFieldPadding(field: HTMLInputElement, controlsWidth: number, rightInset: number) {
+    if (this.paddedField !== field) {
+      this.restoreFieldPadding();
+      this.paddedField = field;
+      this.paddedFieldPaddingRight = field.style.paddingRight;
+    }
+
+    const currentPadding = Number.parseFloat(window.getComputedStyle(field).paddingRight) || 0;
+    const requiredPadding = Math.ceil(controlsWidth + rightInset + CONTROL_INSET + CONTROL_GAP);
+    if (currentPadding >= requiredPadding) return;
+    field.style.paddingRight = `${requiredPadding}px`;
+  }
+
+  private restoreFieldPadding() {
+    if (!this.paddedField) return;
+    this.paddedField.style.paddingRight = this.paddedFieldPaddingRight;
+    this.paddedField = null;
+    this.paddedFieldPaddingRight = '';
+  }
 
   private async showAccountPicker(field: HTMLInputElement) {
     this.closeMenu();
@@ -321,6 +351,7 @@ class Autofiller {
   }
 
   private closeControls() {
+    this.restoreFieldPadding();
     this.controls?.remove();
     this.controls = null;
     this.controlField = null;
@@ -807,3 +838,4 @@ function controlIconSvg(icon: ControlIcon): string {
     </svg>
   `;
 }
+
