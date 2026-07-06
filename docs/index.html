@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Monica KeePass — 本地优先的浏览器密码库</title>
+  <meta name="description" content="Monica KeePass 是 Chrome / Edge 上的本地优先 KeePass .kdbx 密码库插件：Windows Hello 解锁、自动填充、强密码生成、OneDrive 备份与同步，开源 GPL-3.0。" />
+  <link rel="icon" type="image/svg+xml" href="assets/monica-keepass.svg" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#top" aria-label="Monica KeePass 首页">
+        <img src="assets/monica-keepass.svg" alt="" class="brand-logo" width="32" height="32" />
+        <span class="brand-name">Monica KeePass</span>
+      </a>
+      <nav class="topnav" aria-label="主导航">
+        <a href="#features">功能</a>
+        <a href="#workflow">工作流</a>
+        <a href="#security">本地与安全</a>
+        <a href="#install">安装</a>
+        <a class="nav-link-mute" href="https://github.com/tongjibridge/monica-keepass-extension-reference#readme" target="_blank" rel="noopener">README</a>
+        <a class="nav-link-mute" href="https://github.com/tongjibridge/monica-keepass-extension-reference/releases" target="_blank" rel="noopener">下载 Release</a>
+        <a class="pill pill-tonal topbar-cta" href="https://github.com/tongjibridge/monica-keepass-extension-reference" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+      <button class="icon-btn menu-toggle" id="menuToggle" aria-label="展开导航" aria-expanded="false" aria-controls="mobileNav">
+        <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <nav class="topnav-mobile" id="mobileNav" aria-label="移动导航" hidden>
+      <a href="#features">功能</a>
+      <a href="#workflow">工作流</a>
+      <a href="#security">本地与安全</a>
+      <a href="#install">安装</a>
+      <a href="https://github.com/tongjibridge/monica-keepass-extension-reference#readme" target="_blank" rel="noopener">README</a>
+      <a href="https://github.com/tongjibridge/monica-keepass-extension-reference/releases" target="_blank" rel="noopener">下载 Release</a>
+      <a class="pill pill-tonal" href="https://github.com/tongjibridge/monica-keepass-extension-reference" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </header>
+
+  <main id="main">
+    <span id="top"></span>
+
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-badge">
+        <span class="dot" aria-hidden="true"></span>
+        浏览器插件 · KeePass · 本地优先
+      </div>
+      <h1 id="hero-title" class="hero-title">本地优先的 KeePass 密码库<br /><span class="hero-title-sub">在 Chrome 与 Edge 里安静工作</span></h1>
+      <p class="hero-lead">
+        Monica KeePass 是一个浏览器插件，把加密的 <code>.kdbx</code> 密码库留在你的本机，再补上浏览器自动填充、Windows Hello 解锁、强密码生成和 OneDrive 备份/同步。没有插件服务端账号，密码库文件始终由你掌控。
+      </p>
+      <div class="hero-cta">
+        <a class="pill pill-tonal pill-lg" href="https://github.com/tongjibridge/monica-keepass-extension-reference/releases" target="_blank" rel="noopener">下载最新版本</a>
+        <a class="pill pill-outline pill-lg" href="https://github.com/tongjibridge/monica-keepass-extension-reference#readme" target="_blank" rel="noopener">阅读 README</a>
+      </div>
+      <ul class="hero-meta" aria-label="关键特性">
+        <li>KeePass <code>.kdbx</code></li>
+        <li>Windows Hello</li>
+        <li>本地 key 文件</li>
+        <li>自动填充</li>
+        <li>强密码生成</li>
+        <li>OneDrive 同步</li>
+        <li>Chrome / Edge</li>
+        <li>开源 GPL-3.0</li>
+      </ul>
+    </section>
+
+    <section id="features" class="section" aria-labelledby="features-title">
+      <div class="section-head">
+        <h2 id="features-title">功能</h2>
+        <p class="section-sub">围绕本地 KeePass 密码库构建的浏览器能力。</p>
+      </div>
+      <div class="card-grid">
+        <article class="card">
+          <div class="card-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 3 20 6.5V12c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6.5L12 3Z" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <h3>本地优先的 KeePass <code>.kdbx</code></h3>
+          <p>导入或创建 KeePass 兼容的 <code>.kdbx</code> 密码库。文件始终加密保存在本机，由你的主密码与 key 文件保护。</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4" fill="none" stroke="#0B57D0" stroke-width="1.4"/><path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linecap="round"/></svg></div>
+          <h3>Windows Hello 解锁</h3>
+          <p>密码库在本机登记后，可用 Windows Hello 快速解锁。凭据只在本机加密保存，不需要额外网络账号。</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="10" rx="2.5" fill="none" stroke="#0B57D0" stroke-width="1.4"/><path d="M7.5 10V7a4.5 4.5 0 0 1 9 0v3" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linecap="round"/></svg></div>
+          <h3>主密码与本地 key 文件</h3>
+          <p>支持主密码、key 文件，以及在本机记住 key 文件。组合 KeePass 原生凭据方式，不改变文件格式。</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M4 12h12" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linecap="round"/><path d="M12 8l4 4-4 4" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <h3>自动填充</h3>
+          <p>浏览器自动填充采用更接近安卓端的 URL 匹配：精确域名、父子域名、同主域名。登录时少切换，少出错。</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><circle cx="11" cy="11" r="5" fill="none" stroke="#0B57D0" stroke-width="1.4"/><path d="m20 20-4-4" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linecap="round"/></svg></div>
+          <h3>手动选择账号填充</h3>
+          <p>网页输入框旁提供手动搜索与选择账号的按钮。一个站点多账号，或自动匹配不准时，随时手动填充。</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 4v8" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linecap="round"/><path d="M7.5 7.5 12 12l4.5-4.5" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linecap="round"/></svg></div>
+          <h3>强密码生成</h3>
+          <p>在插件弹窗和密码输入框旁一键生成强密码。长度与字符集可控，生成结果不离开本机。</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M7 18a5 5 0 0 1 0-10 6 6 0 0 1 11.5 1.5A4.5 4.5 0 0 1 18 18H7Z" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linejoin="round"/></svg></div>
+          <h3>OneDrive 备份与同步</h3>
+          <p>内置 Microsoft Client ID，设置页直接连接 OneDrive，浏览文件夹选择 <code>.kdbx</code> 初始化；支持拉取远端、上传本地与 KeePass 原生 merge 同步。</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" fill="none" stroke="#0B57D0" stroke-width="1.4"/><path d="M9 12l2 2 4-4" fill="none" stroke="#0B57D0" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+          <h3>开源 GPL-3.0</h3>
+          <p>基于 KeePass 生态与 <code>kdbxweb</code>，源码公开，采用 GPL-3.0-only，与 Monica 安卓参考项目保持一致。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="workflow" class="section section-subtle" aria-labelledby="workflow-title">
+      <div class="section-head">
+        <h2 id="workflow-title">OneDrive 与 KeePass 工作流</h2>
+        <p class="section-sub">把本地密码库放进可备份、可同步的循环里。</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <span class="step-num">1</span>
+          <div class="step-body">
+            <h3>导入或创建本地 <code>.kdbx</code></h3>
+            <p>用主密码（和 key 文件）创建密码库，文件加密保存在本机。Windows Hello 可在登记后用于快速解锁。</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <div class="step-body">
+            <h3>连接 OneDrive</h3>
+            <p>设置页直接连接 OneDrive（内置 Microsoft Client ID），浏览 OneDrive 文件夹，选择 <code>.kdbx</code> 初始化本地库。</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <div class="step-body">
+            <h3>拉取 / 上传 / 同步</h3>
+            <p>拉取远端更新、上传本地改动，或用 KeePass 原生 merge 合并两端。通过 Graph 文件元数据的 ETag/cTag 判断远端变化。</p>
+          </div>
+        </div>
+        <div class="step">
+          <span class="step-num">4</span>
+          <div class="step-body">
+            <h3>避免盲目覆盖</h3>
+            <p>本地保存 base hash，冲突场景下不会盲目覆盖远端密码库。同步流程参考了安卓端的实现方式。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="security" class="section" aria-labelledby="security-title">
+      <div class="section-head">
+        <h2 id="security-title">本地优先与安全</h2>
+        <p class="section-sub">密码库文件始终在你手里。</p>
+      </div>
+      <div class="card-grid card-grid-2">
+        <article class="card">
+          <h3>没有插件服务端账号</h3>
+          <p>插件不提供也不要求独立的服务端账号。密码库是标准 KeePass <code>.kdbx</code> 文件，加解密发生在本机。</p>
+        </article>
+        <article class="card">
+          <h3>Windows Hello 仅限本机</h3>
+          <p>Windows Hello 解锁所需的凭据只在本机加密保存，不会上传。登记与解锁都在你的设备上完成。</p>
+        </article>
+        <article class="card">
+          <h3>同步由你选择</h3>
+          <p>OneDrive 是可选的备份与同步通道。即使不使用，本地密码库、自动填充、密码生成等核心功能照常工作。</p>
+        </article>
+        <article class="card">
+          <h3>标准格式，可移植</h3>
+          <p>使用标准 KeePass <code>.kdbx</code>，可与其他 KeePass 客户端互操作。OneDrive 同步基于 KeePass 原生 merge，不发明私有格式。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="install" class="section section-subtle" aria-labelledby="install-title">
+      <div class="section-head">
+        <h2 id="install-title">安装</h2>
+        <p class="section-sub">面向开发者与参考构建的本地加载方式。</p>
+      </div>
+      <div class="install-grid">
+        <div class="install-text">
+          <ol class="install-list">
+            <li>从仓库克隆代码，或在 <a href="https://github.com/tongjibridge/monica-keepass-extension-reference/releases" target="_blank" rel="noopener">Releases</a> 获取已打包产物。</li>
+            <li>开发者构建：<br /><code>pnpm install</code><br /><code>pnpm run build</code></li>
+            <li>打开 <code>chrome://extensions/</code>（或 Edge 的 <code>edge://extensions/</code>）。</li>
+            <li>启用「开发者模式」。</li>
+            <li>「加载已解压的扩展程序」，选择目录：<br /><code>extension/.output/chrome-mv3</code></li>
+          </ol>
+        </div>
+        <div class="install-aside card">
+          <h3>关于 OneDrive</h3>
+          <p>插件使用 <code>chrome.identity.launchWebAuthFlow</code> 接入 Microsoft identity，并通过 Graph <code>Files.ReadWrite</code> 读写 OneDrive 中的 <code>.kdbx</code>。</p>
+          <p>当前重定向地址会显示在插件设置页的 OneDrive 区域。连接后选择 <code>.kdbx</code> 即可初始化本地库。</p>
+        </div>
+      </div>
+      <div class="install-cta">
+        <a class="pill pill-tonal pill-lg" href="https://github.com/tongjibridge/monica-keepass-extension-reference/releases" target="_blank" rel="noopener">前往 Releases</a>
+        <a class="pill pill-outline pill-lg" href="https://github.com/tongjibridge/monica-keepass-extension-reference#readme" target="_blank" rel="noopener">完整 README</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <img src="assets/monica-keepass.svg" alt="" width="28" height="28" />
+        <span>Monica KeePass</span>
+      </div>
+      <p class="footer-note">本地优先的 KeePass 浏览器插件 · Chrome / Edge · 开源 GPL-3.0</p>
+      <nav class="footer-nav" aria-label="页脚导航">
+        <a href="https://github.com/tongjibridge/monica-keepass-extension-reference" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/tongjibridge/monica-keepass-extension-reference#readme" target="_blank" rel="noopener">README</a>
+        <a href="https://github.com/tongjibridge/monica-keepass-extension-reference/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/tongjibridge/monica-keepass-extension-reference/blob/main/LICENSE" target="_blank" rel="noopener">GPL-3.0</a>
+      </nav>
+      <p class="footer-copy">© Monica KeePass contributors. 参考实现，不附带担保。</p>
+    </div>
+  </footer>
+
+  <script src="script.js" defer></script>
+</body>
+</html>

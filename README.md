@@ -11,6 +11,8 @@
 
 </div>
 
+🌐 在线介绍页（GitHub Pages）：<https://tongjibridge.github.io/monica-keepass-extension-reference/>
+
 Monica KeePass 是一个本地优先的浏览器插件，用于在 Chrome 和 Edge 中管理
 KeePass `.kdbx` 密码库。它保留 KeePass 本地加密文件的使用方式，同时补充
 浏览器自动填充、Windows Hello 解锁、强密码生成和 OneDrive 备份/同步。

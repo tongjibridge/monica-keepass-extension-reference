@@ -11,6 +11,8 @@
 
 </div>
 
+🌐 Product page (GitHub Pages): <https://tongjibridge.github.io/monica-keepass-extension-reference/>
+
 Monica KeePass is a local-first browser extension for working with KeePass `.kdbx`
 vaults in Chrome and Edge. It focuses on keeping the encrypted vault on the
 device while adding browser autofill, Windows Hello unlock, password generation,
