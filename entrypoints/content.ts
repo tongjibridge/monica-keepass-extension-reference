@@ -643,8 +643,10 @@ class CredentialCapture {
   // and our own setNativeValue dispatch non-trusted input events, so we can
   // safely use isTrusted to ignore them.
   private userTypedPasswords = new WeakSet<HTMLInputElement>();
-  // Per-session dedupe to avoid double-firing for the same submission.
-  private lastSent = '';
+  // Dedupe by capture context + short time window. Avoids storing passwords:
+  // submit + click can both fire for the same submission within milliseconds.
+  private lastCaptureCtx = new WeakMap<HTMLFormElement | Document, number>();
+  private static readonly DEDUP_WINDOW_MS = 2000;
   private prompt = new SavePrompt();
 
   init() {
@@ -739,9 +741,10 @@ class CredentialCapture {
       ...(oldPassword ? { oldPassword } : {}),
     };
 
-    const dedupe = `${snapshot.kind}|${snapshot.username}|${snapshot.password}|${snapshot.oldPassword ?? ''}`;
-    if (dedupe === this.lastSent) return;
-    this.lastSent = dedupe;
+    const now = Date.now();
+    const lastTime = this.lastCaptureCtx.get(ctx);
+    if (lastTime != null && now - lastTime < CredentialCapture.DEDUP_WINDOW_MS) return;
+    this.lastCaptureCtx.set(ctx, now);
     void this.sendCapture(snapshot);
   }
 

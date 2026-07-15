@@ -1,6 +1,6 @@
 // Integration check of the chrome-free business logic, bundled the same way the
 // extension is (esbuild), so kdbxweb's CJS named-import interop is exercised too.
-import { VaultEngine } from '@/src/vault/engine';
+import { VaultEngine, getProtectedValueGetTextCount } from '@/src/vault/engine';
 import { matchEntriesForUrl } from '@/src/autofill/match';
 import {
   DEFAULT_PASSWORD_OPTIONS,
@@ -15,6 +15,10 @@ import {
 import { backupFilenameFor, exportBackup, importBackup } from '@/src/backup/codec';
 import { argon2ComputeCount } from '@/src/crypto/argon2';
 import { csvToEntries, parseCsv } from '@/src/import/csv';
+import {
+  lockdownDurationFor,
+  LOCKDOWN_THRESHOLD,
+} from '@/src/vault/lockdown';
 
 let passed = 0;
 function assert(cond: boolean, msg: string) {
@@ -54,6 +58,51 @@ async function main() {
   assert(masked.password === undefined, 'masked getEntry hides password');
   const revealed = VaultEngine.getEntry(a.id, true);
   assert(revealed.password === 's3cret', 'revealed getEntry returns password');
+
+  // --- P0-1: list/match must not decrypt Password plaintext ---
+  const beforeList = getProtectedValueGetTextCount();
+  const listResult = VaultEngine.listEntries();
+  assert(
+    getProtectedValueGetTextCount() === beforeList,
+    'listEntries does not decrypt ProtectedValue (getText not called)',
+  );
+  assert(
+    listResult.find((e) => e.title === 'GitHub')!.hasPassword === true,
+    'entry with password reports hasPassword=true',
+  );
+  assert(
+    listResult.find((e) => e.title === 'Example')!.hasPassword === true,
+    'second entry reports hasPassword=true',
+  );
+
+  // Empty-password entry must report hasPassword=false, also without decrypting.
+  const emptyEntry = VaultEngine.addEntry({
+    title: 'Empty-PW',
+    username: 'nobody',
+    password: '',
+    url: 'https://empty.example.com/',
+    notes: '',
+  });
+  const listWithEmpty = VaultEngine.listEntries();
+  assert(
+    listWithEmpty.find((e) => e.id === emptyEntry.id)!.hasPassword === false,
+    'empty-password entry reports hasPassword=false',
+  );
+  assert(
+    getProtectedValueGetTextCount() === beforeList,
+    'listEntries still did not decrypt after adding empty-password entry',
+  );
+  VaultEngine.deleteEntry(emptyEntry.id);
+  assert(VaultEngine.listEntries().length === 2, 'empty-password test entry removed');
+
+  // match path must also avoid decryption
+  const beforeMatch = getProtectedValueGetTextCount();
+  matchEntriesForUrl(VaultEngine.listEntries(), 'https://github.com/login');
+  assert(
+    getProtectedValueGetTextCount() === beforeMatch,
+    'match does not decrypt ProtectedValue (getText not called)',
+  );
+  // --- end P0-1 ---
 
   VaultEngine.updateEntry({ id: a.id, password: 'rotated' });
   assert(VaultEngine.getEntry(a.id, true).password === 'rotated', 'updateEntry rotates password');
@@ -344,6 +393,22 @@ async function main() {
     VaultEngine.listEntries().some((e) => e.title === 'Bulk A'),
     'bulk-added entries persist across save/open',
   );
+
+  // --- 解锁失败阶梯式锁定策略（参考小米手机，缩放适配浏览器）---
+  assert(
+    lockdownDurationFor(0) === 0 && lockdownDurationFor(4) === 0,
+    '1-4 次失败不锁定',
+  );
+  assert(lockdownDurationFor(5) === 30_000, '第 5 次失败锁定 30 秒');
+  assert(lockdownDurationFor(6) === 60_000, '第 6 次失败锁定 1 分钟');
+  assert(lockdownDurationFor(7) === 300_000, '第 7 次失败锁定 5 分钟');
+  assert(lockdownDurationFor(8) === 900_000, '第 8 次失败锁定 15 分钟');
+  assert(lockdownDurationFor(9) === 1_800_000, '第 9 次失败锁定 30 分钟');
+  assert(
+    lockdownDurationFor(100) === 1_800_000,
+    '第 100 次失败仍为 30 分钟上限',
+  );
+  assert(LOCKDOWN_THRESHOLD === 5, '锁定阈值为第 5 次');
 
   console.log(`\nALL ${passed} HARNESS CHECKS PASSED`);
 }

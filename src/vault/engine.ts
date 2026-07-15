@@ -96,10 +96,27 @@ function applyKdfProfile(d: Kdbx, profile: Exclude<KdfProfile, 'custom'>): void 
   clearArgon2Cache();
 }
 
+// Diagnostic: number of ProtectedValue.getText() calls through fieldText().
+// Used by tests to verify list/match paths do not decrypt password plaintext.
+let protectedValueGetTextCount = 0;
+export function getProtectedValueGetTextCount(): number {
+  return protectedValueGetTextCount;
+}
+
 function fieldText(value: KdbxEntryField | undefined): string {
   if (value == null) return '';
-  if (value instanceof ProtectedValue) return value.getText();
+  if (value instanceof ProtectedValue) {
+    protectedValueGetTextCount++;
+    return value.getText();
+  }
   return String(value);
+}
+
+/** Whether a field holds a non-empty value, without decrypting ProtectedValues. */
+function hasFieldValue(value: KdbxEntryField | undefined): boolean {
+  if (value == null) return false;
+  if (value instanceof ProtectedValue) return value.byteLength > 0;
+  return value.length > 0;
 }
 
 function isRecycleBin(group: KdbxGroup): boolean {
@@ -128,7 +145,7 @@ function summarize(entry: KdbxEntry): EntrySummary {
     username: fieldText(entry.fields.get('UserName')),
     url: fieldText(entry.fields.get('URL')),
     groupId: entry.parentGroup ? entry.parentGroup.uuid.id : '',
-    hasPassword: password != null && fieldText(password).length > 0,
+    hasPassword: hasFieldValue(password),
     hasTotp: entry.fields.has('otp'),
   };
 }

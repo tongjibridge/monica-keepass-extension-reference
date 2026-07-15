@@ -29,6 +29,11 @@ import { csvToEntries } from '@/src/import/csv';
 import type { EntryDetail, EntrySummary, VaultMeta } from '@/src/vault/types';
 import type { ImportResult } from '@/src/messaging/protocol';
 import {
+  formatLockdownRemaining,
+  lockdownDurationFor,
+  LOCKDOWN_THRESHOLD,
+} from '@/src/vault/lockdown';
+import {
   conflictPath,
   DEFAULT_ONEDRIVE_CLIENT_ID,
   fileNameFromPath,
@@ -55,6 +60,13 @@ const ONEDRIVE_SYNC_KEY = 'onedrive.sync';
 const PENDING_KEY = 'autofill.pending';
 const AUTO_LOCK_ALARM = 'autolock';
 const AUTO_LOCK_MINUTES = 15;
+const LOCKDOWN_KEY = 'vault.lockdown';
+
+interface LockdownState {
+  failedAttempts: number;
+  /** epoch ms, null = not locked */
+  lockedUntil: number | null;
+}
 
 // Storage keys included in a backup envelope. Device-specific items (Hello
 // enrollment, OneDrive refresh token, ephemeral pending suggestions) are
@@ -119,15 +131,43 @@ async function route(req: BgRequest): Promise<unknown> {
     }
 
     case 'vault.unlock': {
+      // 锁定期间拒绝解锁尝试
+      const lockdown = await loadLockdown();
+      if (lockdown.lockedUntil && Date.now() < lockdown.lockedUntil) {
+        throw new Error(
+          `密码错误次数过多，请 ${formatLockdownRemaining(lockdown.lockedUntil)} 后再试`,
+        );
+      }
+
       const file = await loadFile();
       if (!file) throw new Error('No vault has been imported yet');
       const keyFile = req.credential.keyFile ?? (await loadRememberedKeyFile()) ?? undefined;
-      await callOffscreen({
-        op: 'open',
-        data: file.data,
-        password: req.credential.password,
-        keyFile,
-      });
+      try {
+        await callOffscreen({
+          op: 'open',
+          data: file.data,
+          password: req.credential.password,
+          keyFile,
+        });
+      } catch {
+        // 解锁失败：递增计数，达到阈值时触发阶梯式锁定
+        const attempts = lockdown.failedAttempts + 1;
+        const duration = lockdownDurationFor(attempts);
+        const lockedUntil = duration > 0 ? Date.now() + duration : null;
+        await saveLockdown({ failedAttempts: attempts, lockedUntil });
+        if (lockedUntil) {
+          throw new Error(
+            `密码错误。连续失败 ${attempts} 次，已锁定 ${formatLockdownRemaining(lockedUntil)}`,
+          );
+        }
+        const warning =
+          attempts >= LOCKDOWN_THRESHOLD - 1
+            ? '，再错 1 次将临时锁定'
+            : '';
+        throw new Error(`密码错误。已失败 ${attempts} 次${warning}`);
+      }
+      // 解锁成功：重置失败计数
+      await saveLockdown({ failedAttempts: 0, lockedUntil: null });
       if (req.rememberKeyFile && req.credential.keyFile) {
         await chrome.storage.local.set({ [KEYFILE_KEY]: req.credential.keyFile });
       }
@@ -265,6 +305,7 @@ async function getStatus(): Promise<VaultStatus> {
   const helloEnrolled = (await chrome.storage.local.get(HELLO_KEY))[HELLO_KEY] != null;
   const rememberedKeyFile = (await loadRememberedKeyFile()) != null;
   const pending = await loadPending();
+  const lockdown = await loadLockdown();
   let unlocked = false;
   let meta: VaultMeta | null = null;
   if (await hasOffscreen()) {
@@ -272,7 +313,16 @@ async function getStatus(): Promise<VaultStatus> {
     unlocked = status.unlocked;
     if (unlocked) meta = (await callOffscreen({ op: 'meta' })) as VaultMeta;
   }
-  return { unlocked, hasVault: file != null, helloEnrolled, rememberedKeyFile, meta, pending };
+  return {
+    unlocked,
+    hasVault: file != null,
+    helloEnrolled,
+    rememberedKeyFile,
+    meta,
+    pending,
+    failedAttempts: lockdown.failedAttempts,
+    lockdownUntil: lockdown.lockedUntil,
+  };
 }
 
 async function importCsv(csv: string): Promise<ImportResult> {
@@ -376,6 +426,23 @@ async function safeSetBadge(text: string, color: string): Promise<void> {
   } catch {
     // chrome.action may not exist in test contexts; ignore.
   }
+}
+
+async function loadLockdown(): Promise<LockdownState> {
+  const v = (await chrome.storage.local.get(LOCKDOWN_KEY))[LOCKDOWN_KEY] as
+    | Partial<LockdownState>
+    | undefined;
+  if (v && typeof v.failedAttempts === 'number') {
+    return {
+      failedAttempts: v.failedAttempts,
+      lockedUntil: typeof v.lockedUntil === 'number' ? v.lockedUntil : null,
+    };
+  }
+  return { failedAttempts: 0, lockedUntil: null };
+}
+
+async function saveLockdown(state: LockdownState): Promise<void> {
+  await chrome.storage.local.set({ [LOCKDOWN_KEY]: state });
 }
 
 async function loadFile(): Promise<StoredFile | null> {

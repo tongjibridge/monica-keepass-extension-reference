@@ -209,6 +209,7 @@ export function App() {
           <LockedView
             busy={busy}
             status={status}
+            error={error}
             onSwitchVault={() => {
               setError('');
               setView('setup');
@@ -598,12 +599,14 @@ function OneDriveVaultPicker({
 function LockedView({
   busy,
   status,
+  error,
   onSwitchVault,
   onUnlock,
   onHello,
 }: {
   busy: boolean;
   status: VaultStatus;
+  error: string;
   onSwitchVault: () => void;
   onUnlock: (credential: CredentialInput, rememberKeyFile: boolean) => void;
   onHello: () => void;
@@ -624,14 +627,31 @@ function LockedView({
   const submit = () =>
     onUnlock({ password: password || null, keyFile: keyFileB64 ?? undefined }, remember);
 
+  const isLockedDown = status.lockdownUntil != null && Date.now() < status.lockdownUntil;
+
   return (
     <div className="grid gap-3">
+      {isLockedDown && (
+        <Alert variant="destructive">
+          <IconLock className="size-4" />
+          <AlertTitle>已锁定</AlertTitle>
+          <AlertDescription>
+            密码错误次数过多，请等待倒计时结束后重试。
+          </AlertDescription>
+        </Alert>
+      )}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
       <Field label="Master password" description="Leave empty for a key-file-only vault">
         <PasswordInput
           autoFocus
           value={password}
           onChange={(e) => setPassword(e.currentTarget.value)}
-          onKeyDown={(e) => e.key === 'Enter' && canUnlock && submit()}
+          onKeyDown={(e) => e.key === 'Enter' && canUnlock && !isLockedDown && submit()}
         />
       </Field>
 
@@ -648,11 +668,11 @@ function LockedView({
         />
       )}
 
-      <Button disabled={busy || !canUnlock} onClick={submit}>
+      <Button disabled={busy || !canUnlock || isLockedDown} onClick={submit}>
         Unlock
       </Button>
       {status.helloEnrolled && (
-        <Button variant="outline" disabled={busy} onClick={onHello}>
+        <Button variant="outline" disabled={busy || isLockedDown} onClick={onHello}>
           <IconFingerprint className="size-4.5" />
           Unlock with Windows Hello
         </Button>

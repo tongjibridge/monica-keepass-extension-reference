@@ -103,6 +103,10 @@ export interface VaultStatus {
   rememberedKeyFile: boolean;
   meta: VaultMeta | null;
   pending: PendingSuggestion | null;
+  /** 当前累计解锁失败次数（解锁成功时重置为 0）。 */
+  failedAttempts: number;
+  /** 锁定截止时间戳（Date.now() ms），null 表示未锁定。 */
+  lockdownUntil: number | null;
 }
 
 export interface OneDriveSyncState {
