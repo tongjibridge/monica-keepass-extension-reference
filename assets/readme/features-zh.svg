@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="100%">
+  <defs>
+    <linearGradient id="cardGrad" x1="0" y1="0" x2="0" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFD"/>
+      <stop offset="100%" stop-color="#EEF2F7"/>
+    </linearGradient>
+    <linearGradient id="iconBg1" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0B57D0"/>
+      <stop offset="1" stop-color="#0A4A7A"/>
+    </linearGradient>
+    <linearGradient id="iconBg2" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1A73E8"/>
+      <stop offset="1" stop-color="#0B57D0"/>
+    </linearGradient>
+    <linearGradient id="iconBg3" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4A9EFF"/>
+      <stop offset="1" stop-color="#1A73E8"/>
+    </linearGradient>
+    <linearGradient id="iconBg4" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#669DF6"/>
+      <stop offset="1" stop-color="#4A9EFF"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-5%" y="-5%" width="110%" height="115%">
+      <feDropShadow dx="0" dy="4" stdDeviation="12" flood-color="#0B1F3A" flood-opacity="0.08"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="320" fill="transparent"/>
+
+  <!-- Card 1: Vault Management -->
+  <g transform="translate(60, 40)" filter="url(#cardShadow)">
+    <rect width="250" height="240" rx="16" fill="url(#cardGrad)" stroke="#DCE3ED" stroke-width="1"/>
+    <rect x="24" y="24" width="48" height="48" rx="12" fill="url(#iconBg1)"/>
+    <!-- Shield icon -->
+    <path d="M48 38l12 5v9.8c0 10-5.8 16-12 19.2-6.2-3.2-12-9.2-12-19.2V43l12-5Z" transform="translate(24 24)" fill="#fff" opacity="0.9"/>
+    <text x="24" y="108" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="18" font-weight="700" fill="#0B1F3A">.kdbx 密码库</text>
+    <text x="24" y="138" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">导入或创建 KeePass 兼容库</text>
+    <text x="24" y="160" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">支持主密码 + key 文件</text>
+    <text x="24" y="182" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">本地加密，不发往服务器</text>
+    <!-- Bottom accent -->
+    <rect x="24" y="200" width="40" height="3" rx="1.5" fill="#0B57D0"/>
+  </g>
+
+  <!-- Card 2: Windows Hello -->
+  <g transform="translate(345, 40)" filter="url(#cardShadow)">
+    <rect width="250" height="240" rx="16" fill="url(#cardGrad)" stroke="#DCE3ED" stroke-width="1"/>
+    <rect x="24" y="24" width="48" height="48" rx="12" fill="url(#iconBg2)"/>
+    <!-- Hello / fingerprint icon -->
+    <path d="M44 20c-2 0-3.7.4-5 1v10h3V23c1-.5 2-1 3-1s2 .5 3 1v6c0 3-1 5-3 7v2c3-2 5-5 5-9v-4c0-3-2-4-4-4Zm-16 0c-2 0-4 1-4 4v9c0 3 1 5 3 7v2c-3-2-5-6-5-9v-9c0-4 3-6 6-6v3Zm8 1c-2 0-3 1-3 3v8c0 2 1 4 3 5v2c-3-1-5-4-5-7v-8c0-3 2-6 5-6v3Zm8 5c-2 0-3 1-3 3v7c0 2 1 4 3 5v2c-3-1-5-4-5-7v-7c0-3 2-6 5-6v3Zm8 3c-2 0-3 1-3 3v5c0 2 1 4 3 5v2c-3-1-5-4-5-7v-5c0-3 2-6 5-6v3Z" transform="translate(12 4)" fill="#fff"/>
+    <text x="24" y="108" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="18" font-weight="700" fill="#0B1F3A">Windows Hello 解锁</text>
+    <text x="24" y="138" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">指纹 / 面部 / PIN 快速解锁</text>
+    <text x="24" y="160" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">凭据本机加密存储</text>
+    <text x="24" y="182" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">无需每次输入主密码</text>
+    <rect x="24" y="200" width="40" height="3" rx="1.5" fill="#1A73E8"/>
+  </g>
+
+  <!-- Card 3: Autofill -->
+  <g transform="translate(630, 40)" filter="url(#cardShadow)">
+    <rect width="250" height="240" rx="16" fill="url(#cardGrad)" stroke="#DCE3ED" stroke-width="1"/>
+    <rect x="24" y="24" width="48" height="48" rx="12" fill="url(#iconBg3)"/>
+    <!-- Cursor + input icon -->
+    <rect x="14" y="30" width="44" height="36" rx="5" fill="none" stroke="#fff" stroke-width="2.5"/>
+    <line x1="22" y1="48" x2="34" y2="48" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M38 18v18l-5-3" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="24" y="108" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="18" font-weight="700" fill="#0B1F3A">智能自动填充</text>
+    <text x="24" y="138" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">精确域名 / 父子域名匹配</text>
+    <text x="24" y="160" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">输入框旁手动搜索选择</text>
+    <text x="24" y="182" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">强密码一键生成</text>
+    <rect x="24" y="200" width="40" height="3" rx="1.5" fill="#4A9EFF"/>
+  </g>
+
+  <!-- Card 4: OneDrive Sync -->
+  <g transform="translate(915, 40)" filter="url(#cardShadow)">
+    <rect width="250" height="240" rx="16" fill="url(#cardGrad)" stroke="#DCE3ED" stroke-width="1"/>
+    <rect x="24" y="24" width="48" height="48" rx="12" fill="url(#iconBg4)"/>
+    <!-- Cloud + sync arrows icon -->
+    <path d="M34 14c-6 0-10.5 4.5-10.5 10.5v1h-1C16 25.5 12 29.5 12 34.5s4 9 9 9h22c5.5 0 10-4.5 10-10s-4.5-10-10-10h-1v-1C42 17.5 38.5 14 34 14Z" transform="translate(-12 0)" fill="#fff" opacity="0.95"/>
+    <path d="M28 35l3-3 3 3M31 32v9M38 44l-3 3-3-3M35 47v-9" stroke="#0B57D0" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="24" y="108" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="18" font-weight="700" fill="#0B1F3A">OneDrive 同步</text>
+    <text x="24" y="138" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">内置 Microsoft Client ID</text>
+    <text x="24" y="160" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">浏览远端 &amp; 选择 .kdbx</text>
+    <text x="24" y="182" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#4A5568">KeePass 原生合并同步</text>
+    <rect x="24" y="200" width="40" height="3" rx="1.5" fill="#669DF6"/>
+  </g>
+</svg>
