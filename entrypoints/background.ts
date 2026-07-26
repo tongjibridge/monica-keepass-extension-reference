@@ -10,6 +10,7 @@ import {
   type OneDriveStatus,
   type OneDriveSyncResult,
   type OneDriveSyncState,
+  type PendingSuggestionPublic,
   type VaultStatus,
 } from '@/src/messaging/protocol';
 import {
@@ -18,15 +19,13 @@ import {
   importBackup,
   type BackupCredential,
 } from '@/src/backup/codec';
-import { matchEntriesForUrl } from '@/src/autofill/match';
 import {
-  decideSuggestion,
+  toPendingSuggestionMetadata,
   type CredentialSnapshot,
-  type EnrichedEntry,
-  type PendingSuggestion,
+  type PendingSuggestionMetadata,
 } from '@/src/autofill/suggest';
 import { csvToEntries } from '@/src/import/csv';
-import type { EntryDetail, EntrySummary, VaultMeta } from '@/src/vault/types';
+import type { VaultMeta } from '@/src/vault/types';
 import type { ImportResult } from '@/src/messaging/protocol';
 import {
   formatLockdownRemaining,
@@ -58,6 +57,8 @@ const ONEDRIVE_CONFIG_KEY = 'onedrive.config';
 const ONEDRIVE_TOKEN_KEY = 'onedrive.token';
 const ONEDRIVE_SYNC_KEY = 'onedrive.sync';
 const PENDING_KEY = 'autofill.pending';
+const PENDING_TTL_ALARM = 'pendingTTL';
+const PENDING_TTL_MS = 60_000;
 const AUTO_LOCK_ALARM = 'autolock';
 const AUTO_LOCK_MINUTES = 15;
 const LOCKDOWN_KEY = 'vault.lockdown';
@@ -84,6 +85,11 @@ interface StoredFile {
   data: string; // base64 of the .kdbx bytes
 }
 
+type PendingSuggestionStored = PendingSuggestionPublic & { token: string };
+
+let pendingStateTail: Promise<void> = Promise.resolve();
+let offscreenCreationPromise: Promise<void> | null = null;
+
 export default defineBackground(() => {
   chrome.runtime.onMessage.addListener((msg: BgRequest, _sender, sendResponse) => {
     // Offscreen-targeted envelopes are handled in the offscreen document.
@@ -96,11 +102,19 @@ export default defineBackground(() => {
   });
 
   chrome.alarms.onAlarm.addListener((alarm) => {
-    if (alarm.name === AUTO_LOCK_ALARM) {
-      callOffscreen({ op: 'lock' }).catch(() => {});
-    }
+    void handleAlarm(alarm).catch((err: unknown) => {
+      console.error('Alarm cleanup failed:', errorMessage(err));
+    });
   });
 });
+
+async function handleAlarm(alarm: chrome.alarms.Alarm): Promise<void> {
+  if (alarm.name === AUTO_LOCK_ALARM) {
+    await lockExistingVaultAndClearPending();
+  } else if (alarm.name === PENDING_TTL_ALARM) {
+    await clearPendingSafe();
+  }
+}
 
 async function route(req: BgRequest): Promise<unknown> {
   switch (req.type) {
@@ -109,7 +123,7 @@ async function route(req: BgRequest): Promise<unknown> {
 
     case 'vault.import':
       // Switching vaults: drop any open vault and credentials tied to the old one.
-      await callOffscreen({ op: 'lock' }).catch(() => {});
+      await lockExistingVaultAndClearPending();
       await chrome.storage.local.set({
         [FILE_KEY]: { name: req.name ?? 'vault.kdbx', data: req.data } satisfies StoredFile,
       });
@@ -117,6 +131,7 @@ async function route(req: BgRequest): Promise<unknown> {
       return getStatus();
 
     case 'vault.createNew': {
+      await lockExistingVaultAndClearPending();
       const data = (await callOffscreen({
         op: 'createNew',
         name: req.name,
@@ -176,8 +191,8 @@ async function route(req: BgRequest): Promise<unknown> {
     }
 
     case 'vault.lock':
-      await callOffscreen({ op: 'lock' });
-      chrome.alarms.clear(AUTO_LOCK_ALARM);
+      await lockExistingVaultAndClearPending();
+      await chrome.alarms.clear(AUTO_LOCK_ALARM);
       return getStatus();
 
     case 'vault.forgetKeyFile':
@@ -187,6 +202,11 @@ async function route(req: BgRequest): Promise<unknown> {
     case 'vault.listEntries':
       armAutoLock();
       return callOffscreen({ op: 'listEntries' });
+
+    case 'vault.pickerEntries': {
+      armAutoLock();
+      return callOffscreen({ op: 'pickerEntries', url: req.url });
+    }
 
     case 'vault.listGroups':
       armAutoLock();
@@ -219,8 +239,7 @@ async function route(req: BgRequest): Promise<unknown> {
 
     case 'vault.match': {
       armAutoLock();
-      const entries = (await callOffscreen({ op: 'listEntries' })) as EntrySummary[];
-      return matchEntriesForUrl(entries, req.url);
+      return callOffscreen({ op: 'matchEntries', url: req.url });
     }
 
     case 'vault.export':
@@ -244,11 +263,11 @@ async function route(req: BgRequest): Promise<unknown> {
       return handleCapture(req.snapshot);
 
     case 'vault.applyPending':
-      await applyPending(req.entryId);
+      await applyPending(req.pendingId, req.entryId);
       return getStatus();
 
     case 'vault.dismissPending':
-      await setPending(null);
+      await dismissPending(req.pendingId);
       return getStatus();
 
     case 'backup.exportLocal':
@@ -343,80 +362,183 @@ async function importCsv(csv: string): Promise<ImportResult> {
   return { imported: added, skipped, total: entries.length };
 }
 
-async function handleCapture(snapshot: CredentialSnapshot): Promise<PendingSuggestion | null> {
+function withPendingState<T>(task: () => Promise<T>): Promise<T> {
+  const run = pendingStateTail.then(task, task);
+  pendingStateTail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+async function handleCapture(snapshot: CredentialSnapshot): Promise<PendingSuggestionPublic | null> {
+  return withPendingState(() => handleCaptureUnlocked(snapshot));
+}
+
+async function handleCaptureUnlocked(
+  snapshot: CredentialSnapshot,
+): Promise<PendingSuggestionPublic | null> {
   if (!snapshot?.password) return null;
   // Cannot decide save vs update without entries; drop while locked.
   if (!(await hasOffscreen())) return null;
   const offscreenStatus = (await callOffscreen({ op: 'status' })) as { unlocked: boolean };
   if (!offscreenStatus.unlocked) return null;
 
-  const entries = (await callOffscreen({ op: 'listEntries' })) as EntrySummary[];
-  const urlMatched = matchEntriesForUrl(entries, snapshot.url);
-  const usernameKey = snapshot.username.trim().toLowerCase();
-  const enriched: EnrichedEntry[] = await Promise.all(
-    urlMatched.map(async (entry) => {
-      if (entry.username.trim().toLowerCase() !== usernameKey) return entry;
-      const detail = (await callOffscreen({
-        op: 'getEntry',
-        id: entry.id,
-        reveal: true,
-      })) as EntryDetail;
-      return { ...entry, password: detail.password };
-    }),
-  );
+  const prepared = (await callOffscreen({
+    op: 'preparePending',
+    snapshot,
+  })) as { token: string; suggestion: PendingSuggestionMetadata } | null;
+  if (!prepared) return null;
 
-  const suggestion = decideSuggestion(enriched, snapshot);
-  if (!suggestion) return null;
-  await setPending(suggestion);
-  // The capturing content script renders the in-page prompt from this return.
-  return suggestion;
+  // Password matching and secret storage happen inside offscreen. Background
+  // receives only an opaque token and explicitly allowlisted metadata.
+  const publicSuggestion: PendingSuggestionPublic = {
+    ...toPendingSuggestionMetadata(prepared.suggestion),
+    id: crypto.randomUUID(),
+  };
+  const stored: PendingSuggestionStored = {
+    ...publicSuggestion,
+    token: prepared.token,
+  };
+  try {
+    await setPendingStored(stored);
+    await chrome.alarms.create(PENDING_TTL_ALARM, { delayInMinutes: 1 });
+    return publicSuggestion;
+  } catch (err) {
+    await clearPendingUnlocked().catch(() => {});
+    throw err;
+  }
 }
 
-async function applyPending(overrideEntryId?: string): Promise<void> {
-  const pending = await loadPending();
+async function applyPending(pendingId: string, overrideEntryId?: string): Promise<void> {
+  return withPendingState(() => applyPendingUnlocked(pendingId, overrideEntryId));
+}
+
+async function applyPendingUnlocked(
+  pendingId: string,
+  overrideEntryId?: string,
+): Promise<void> {
+  const pending = await loadPendingStoredUnlocked();
   if (!pending) throw new Error('No pending credential to save');
+  if (pending.id !== pendingId) throw new Error('This credential prompt is no longer current');
 
   if (!(await hasOffscreen())) throw new Error('Unlock the vault first');
   const offscreenStatus = (await callOffscreen({ op: 'status' })) as { unlocked: boolean };
   if (!offscreenStatus.unlocked) throw new Error('Unlock the vault first');
 
-  if (pending.action === 'save') {
-    await callOffscreen({
-      op: 'add',
-      input: {
+  try {
+    if (pending.action === 'save') {
+      await callOffscreen({
+        op: 'applyPending',
+        token: pending.token,
+        action: 'save',
         title: pending.origin || pending.url,
         username: pending.username,
-        password: pending.newPassword,
         url: pending.url,
-        notes: '',
-      },
+      });
+    } else {
+      const entryId = overrideEntryId ?? pending.entryId;
+      if (!entryId) throw new Error('Pending update is missing an entry ID');
+      await callOffscreen({
+        op: 'applyPending',
+        token: pending.token,
+        action: 'update',
+        entryId,
+      });
+    }
+    await persist();
+  } catch (err) {
+    await callExistingOffscreen({
+      op: 'rollbackPending',
+      token: pending.token,
+    }).catch((rollbackErr: unknown) => {
+      console.error('Pending rollback failed:', errorMessage(rollbackErr));
     });
-  } else {
-    const entryId = overrideEntryId ?? pending.entryId;
-    if (!entryId) throw new Error('No target entry to update');
-    await callOffscreen({
-      op: 'update',
-      input: { id: entryId, password: pending.newPassword },
-    });
+    throw err;
   }
-  await persist();
-  await setPending(null);
+  await callOffscreen({ op: 'commitPending', token: pending.token });
+  await clearPendingMetadataUnlocked();
   armAutoLock();
 }
 
-async function loadPending(): Promise<PendingSuggestion | null> {
-  const stored = await chrome.storage.session.get(PENDING_KEY);
-  return (stored[PENDING_KEY] as PendingSuggestion | undefined) ?? null;
+/** Lazy TTL check: if the pending secret has expired, purge it. */
+async function loadPending(): Promise<PendingSuggestionPublic | null> {
+  const pending = await withPendingState(loadPendingStoredUnlocked);
+  return pending
+    ? { ...toPendingSuggestionMetadata(pending), id: pending.id }
+    : null;
 }
 
-async function setPending(suggestion: PendingSuggestion | null): Promise<void> {
-  if (suggestion) {
-    await chrome.storage.session.set({ [PENDING_KEY]: suggestion });
-    await safeSetBadge('1', '#2563eb');
-  } else {
-    await chrome.storage.session.remove(PENDING_KEY);
-    await safeSetBadge('', '#000000');
+async function loadPendingStoredUnlocked(): Promise<PendingSuggestionStored | null> {
+  const stored = await chrome.storage.session.get(PENDING_KEY);
+  const pending = stored[PENDING_KEY] as PendingSuggestionStored | undefined;
+  if (!pending) return null;
+  if (typeof pending.token !== 'string') {
+    await clearPendingUnlocked();
+    return null;
   }
+  if (Date.now() - pending.createdAt > PENDING_TTL_MS) {
+    await clearPendingUnlocked();
+    return null;
+  }
+  return pending;
+}
+
+async function setPendingStored(suggestion: PendingSuggestionStored): Promise<void> {
+  await chrome.storage.session.set({ [PENDING_KEY]: suggestion });
+  await safeSetBadge('1', '#2563eb');
+}
+
+/** Purge pending from session storage and zero the offscreen-held secret. */
+async function clearPendingSafe(): Promise<void> {
+  return withPendingState(clearPendingUnlocked);
+}
+
+async function dismissPending(pendingId: string): Promise<void> {
+  return withPendingState(async () => {
+    const pending = await loadPendingStoredUnlocked();
+    if (!pending) return;
+    if (pending.id !== pendingId) {
+      throw new Error('This credential prompt is no longer current');
+    }
+    await clearPendingUnlocked();
+  });
+}
+
+async function clearPendingMetadataUnlocked(): Promise<void> {
+  const results = await Promise.allSettled([
+    chrome.storage.session.remove(PENDING_KEY),
+    safeSetBadge('', '#000000'),
+    chrome.alarms.clear(PENDING_TTL_ALARM),
+  ]);
+  const failed = results.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  );
+  if (failed) throw failed.reason;
+}
+
+async function clearPendingUnlocked(): Promise<void> {
+  const results = await Promise.allSettled([
+    clearPendingMetadataUnlocked(),
+    callExistingOffscreen({ op: 'clearPending' }),
+  ]);
+  const failed = results.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected',
+  );
+  if (failed) throw failed.reason;
+}
+
+async function lockExistingVaultAndClearPending(): Promise<void> {
+  return withPendingState(async () => {
+    const results = await Promise.allSettled([
+      clearPendingUnlocked(),
+      callExistingOffscreen({ op: 'lock' }),
+    ]);
+    const failed = results.find(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failed) throw failed.reason;
+  });
 }
 
 async function safeSetBadge(text: string, color: string): Promise<void> {
@@ -502,7 +624,7 @@ async function pullOneDrive(): Promise<OneDriveSyncResult> {
       statRemote(token, config.remotePath),
     ]);
     if (!stat) throw new Error('OneDrive remote vault does not exist');
-    await callOffscreen({ op: 'lock' }).catch(() => {});
+    await lockExistingVaultAndClearPending();
     await chrome.storage.local.set({
       [FILE_KEY]: { name: fileNameFromPath(config.remotePath), data: remoteData } satisfies StoredFile,
     });
@@ -543,7 +665,7 @@ async function syncOneDrive(credential: CredentialInput | null): Promise<OneDriv
     if (!remoteStat) {
       await updateOneDrivePhase({ syncPhase: 'UPLOADING' });
       const created = await writeRemote(token, config.remotePath, localData, null);
-      await rememberOneDriveSuccess(localData, created);
+      await rememberOneDriveSuccess(localData, created, localHash);
       return { action: 'pushed', message: 'OneDrive file did not exist, so the local vault was uploaded.', stat: created };
     }
 
@@ -555,7 +677,7 @@ async function syncOneDrive(credential: CredentialInput | null): Promise<OneDriv
     if (!sync?.remoteVersionToken) {
       const remoteData = await readRemote(token, config.remotePath);
       if (localHash === (await sha256Hex(remoteData))) {
-        await rememberOneDriveSuccess(localData, remoteStat);
+        await rememberOneDriveSuccess(localData, remoteStat, localHash);
         return { action: 'synced', message: 'Local and OneDrive vaults are already the same.', stat: remoteStat };
       }
       if (!credential) {
@@ -575,20 +697,20 @@ async function syncOneDrive(credential: CredentialInput | null): Promise<OneDriv
 
     if (!remoteChanged) {
       if (!localChanged && sync?.remoteVersionToken) {
-        await rememberOneDriveSuccess(localData, remoteStat);
+        await rememberOneDriveSuccess(localData, remoteStat, localHash);
         return { action: 'synced', message: 'Vault is already in sync.', stat: remoteStat };
       }
       await updateOneDrivePhase({ syncPhase: 'UPLOADING' });
       const uploaded = await writeRemote(token, config.remotePath, localData, remoteStat.versionToken);
       await storeVaultFile(localData, fileNameFromPath(config.remotePath));
-      await rememberOneDriveSuccess(localData, uploaded);
+      await rememberOneDriveSuccess(localData, uploaded, localHash);
       return { action: 'pushed', message: 'Uploaded local changes to OneDrive.', stat: uploaded };
     }
 
     await updateOneDrivePhase({ syncPhase: localChanged ? 'MERGING' : 'DOWNLOADING' });
     const remoteData = await readRemote(token, config.remotePath);
     if (!localChanged) {
-      await callOffscreen({ op: 'lock' }).catch(() => {});
+      await lockExistingVaultAndClearPending();
       await storeVaultFile(remoteData, fileNameFromPath(config.remotePath));
       await rememberOneDriveSuccess(remoteData, remoteStat);
       return { action: 'pulled', message: 'Downloaded newer OneDrive changes.', stat: remoteStat };
@@ -711,8 +833,12 @@ async function updateOneDrivePhase(patch: OneDriveSyncState): Promise<void> {
   await chrome.storage.local.set({ [ONEDRIVE_SYNC_KEY]: { ...previous, ...patch } satisfies OneDriveSyncState });
 }
 
-async function rememberOneDriveSuccess(data: string, stat: OneDriveFileStat): Promise<void> {
-  const hash = await sha256Hex(data);
+async function rememberOneDriveSuccess(
+  data: string,
+  stat: OneDriveFileStat,
+  knownHash?: string,
+): Promise<void> {
+  const hash = knownHash ?? (await sha256Hex(data));
   await chrome.storage.local.set({
     [ONEDRIVE_SYNC_KEY]: {
       remoteVersionToken: stat.versionToken,
@@ -752,21 +878,37 @@ async function hasOffscreen(): Promise<boolean> {
 }
 
 async function ensureOffscreen(): Promise<void> {
-  if (await hasOffscreen()) return;
-  await chrome.offscreen.createDocument({
-    url: 'offscreen.html',
-    reasons: ['BLOBS' as chrome.offscreen.Reason],
-    justification: 'Hold the decrypted KeePass vault in memory and run the Argon2 KDF.',
-  });
+  if (!offscreenCreationPromise) {
+    offscreenCreationPromise = (async () => {
+      if (await hasOffscreen()) return;
+      await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['BLOBS' as chrome.offscreen.Reason],
+        justification: 'Hold the decrypted KeePass vault in memory and run the Argon2 KDF.',
+      });
+    })().finally(() => {
+      offscreenCreationPromise = null;
+    });
+  }
+  await offscreenCreationPromise;
 }
 
-async function callOffscreen(payload: OffscreenOp): Promise<unknown> {
-  await ensureOffscreen();
+async function sendOffscreen(payload: OffscreenOp): Promise<unknown> {
   const res = await chrome.runtime.sendMessage({ target: 'offscreen', payload });
   if (!res || res.ok !== true) {
     throw new Error(res && !res.ok ? res.error : 'Offscreen call failed');
   }
   return res.value;
+}
+
+async function callOffscreen(payload: OffscreenOp): Promise<unknown> {
+  await ensureOffscreen();
+  return sendOffscreen(payload);
+}
+
+async function callExistingOffscreen(payload: OffscreenOp): Promise<unknown> {
+  if (!(await hasOffscreen())) return undefined;
+  return sendOffscreen(payload);
 }
 
 function toBackupCredential(input: BackupCredentialInput): BackupCredential {
@@ -851,7 +993,7 @@ async function backupApplyImport(
   }
 
   // Lock the current vault and stop any pending autolock.
-  await callOffscreen({ op: 'lock' }).catch(() => {});
+  await lockExistingVaultAndClearPending();
   try {
     await chrome.alarms.clear(AUTO_LOCK_ALARM);
   } catch {}
@@ -869,10 +1011,6 @@ async function backupApplyImport(
     if (payload.storage[key] !== undefined) allowed[key] = payload.storage[key];
   }
   await chrome.storage.local.set(allowed);
-
-  // Drop ephemeral state too.
-  await chrome.storage.session.remove(PENDING_KEY);
-  await safeSetBadge('', '#000000');
 }
 
 function errorMessage(err: unknown): string {

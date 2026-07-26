@@ -1,7 +1,7 @@
 import {
   callBackground,
   type CredentialSnapshot,
-  type PendingSuggestion,
+  type PendingSuggestionPublic,
 } from '@/src/messaging/protocol';
 import { DEFAULT_PASSWORD_OPTIONS, generatePassword } from '@/src/crypto/generator';
 import type { EntrySummary } from '@/src/vault/types';
@@ -400,15 +400,7 @@ class Autofiller {
   }
 
   private async loadPickerEntries(): Promise<EntrySummary[]> {
-    const [matches, entries] = await Promise.all([
-      callBackground({ type: 'vault.match', url: location.href }).catch(() => [] as EntrySummary[]),
-      callBackground({ type: 'vault.listEntries' }),
-    ]);
-
-    const ordered = new Map<string, EntrySummary>();
-    for (const entry of matches) ordered.set(entry.id, entry);
-    for (const entry of entries) ordered.set(entry.id, entry);
-    return [...ordered.values()];
+    return callBackground({ type: 'vault.pickerEntries', url: location.href });
   }
 
   private renderAccountRows(list: HTMLDivElement, field: HTMLInputElement, entries: EntrySummary[]) {
@@ -764,7 +756,7 @@ class CredentialCapture {
 class SavePrompt {
   private host: HTMLDivElement | null = null;
 
-  show(suggestion: PendingSuggestion) {
+  show(suggestion: PendingSuggestionPublic) {
     this.close();
     const isSave = suggestion.action === 'save';
     const account = suggestion.username || '(no username)';
@@ -818,23 +810,26 @@ class SavePrompt {
     host.addEventListener('click', (e) => e.stopPropagation());
     host.querySelector('[data-act=close]')?.addEventListener('click', () => this.close());
     host.querySelector('[data-act=dismiss]')?.addEventListener('click', () => {
-      void callBackground({ type: 'vault.dismissPending' }).catch(() => {});
+      void callBackground({
+        type: 'vault.dismissPending',
+        pendingId: suggestion.id,
+      }).catch(() => {});
       this.close();
     });
     host.querySelector('[data-act=apply]')?.addEventListener('click', (e) => {
-      void this.apply(e.currentTarget as HTMLButtonElement);
+      void this.apply(e.currentTarget as HTMLButtonElement, suggestion.id);
     });
 
     document.body.appendChild(host);
     this.host = host;
   }
 
-  private async apply(button: HTMLButtonElement) {
+  private async apply(button: HTMLButtonElement, pendingId: string) {
     button.disabled = true;
     button.textContent = 'Saving…';
     button.style.opacity = '0.7';
     try {
-      await callBackground({ type: 'vault.applyPending' });
+      await callBackground({ type: 'vault.applyPending', pendingId });
       this.flashSaved();
     } catch (err) {
       button.disabled = false;

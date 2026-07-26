@@ -8,9 +8,9 @@ import {
   generatePassword,
 } from '@/src/crypto/generator';
 import {
-  decideSuggestion,
+  decideSuggestionFromComparisons,
+  type ComparedEntry,
   type CredentialSnapshot,
-  type EnrichedEntry,
 } from '@/src/autofill/suggest';
 import { backupFilenameFor, exportBackup, importBackup } from '@/src/backup/codec';
 import { argon2ComputeCount } from '@/src/crypto/argon2';
@@ -199,15 +199,23 @@ async function main() {
   assert(estimateEntropyBits({ ...DEFAULT_PASSWORD_OPTIONS, length: 20 }) > 100, 'entropy estimate sane');
 
   // --- save/update decision (suggest.ts) ---
-  const mkEntry = (
-    overrides: Partial<EnrichedEntry> & Pick<EnrichedEntry, 'id' | 'username'>,
-  ): EnrichedEntry => ({
-    title: overrides.title ?? '',
-    url: overrides.url ?? '',
-    groupId: '',
-    hasPassword: true,
-    hasTotp: false,
-    ...overrides,
+  const mkCompared = (
+    id: string,
+    username: string,
+    matchesNewPassword = false,
+    matchesOldPassword = false,
+  ): ComparedEntry => ({
+    entry: {
+      id,
+      username,
+      title: '',
+      url: '',
+      groupId: '',
+      hasPassword: true,
+      hasTotp: false,
+    },
+    matchesNewPassword,
+    matchesOldPassword,
   });
 
   const submitFor = (
@@ -222,20 +230,20 @@ async function main() {
     ...overrides,
   });
 
-  const sugSave = decideSuggestion(
-    [mkEntry({ id: 'other', username: 'bob', password: 'pw' })],
+  const sugSave = decideSuggestionFromComparisons(
+    [mkCompared('other', 'bob')],
     submitFor('alice', 'newpw'),
   );
   assert(sugSave?.action === 'save' && sugSave.newPassword === 'newpw', 'no user match → save');
 
-  const sugSilent = decideSuggestion(
-    [mkEntry({ id: 'a', username: 'Alice', password: 'same' })],
+  const sugSilent = decideSuggestionFromComparisons(
+    [mkCompared('a', 'Alice', true)],
     submitFor('alice', 'same'),
   );
   assert(sugSilent === null, 'same username + same password → silent');
 
-  const sugUpdate = decideSuggestion(
-    [mkEntry({ id: 'a', username: 'alice', password: 'old' })],
+  const sugUpdate = decideSuggestionFromComparisons(
+    [mkCompared('a', 'alice')],
     submitFor('alice', 'new'),
   );
   assert(
@@ -243,10 +251,10 @@ async function main() {
     'same username + different password → update',
   );
 
-  const sugChange = decideSuggestion(
+  const sugChange = decideSuggestionFromComparisons(
     [
-      mkEntry({ id: 'a', username: 'alice', password: 'wrongOld' }),
-      mkEntry({ id: 'b', username: 'alice', password: 'rightOld' }),
+      mkCompared('a', 'alice'),
+      mkCompared('b', 'alice', false, true),
     ],
     submitFor('alice', 'shinyNew', { kind: 'change-form', oldPassword: 'rightOld' }),
   );
@@ -255,10 +263,10 @@ async function main() {
     'change-form picks entry matching oldPassword',
   );
 
-  const sugChangeFallback = decideSuggestion(
+  const sugChangeFallback = decideSuggestionFromComparisons(
     [
-      mkEntry({ id: 'a', username: 'alice', password: 'nope' }),
-      mkEntry({ id: 'b', username: 'alice', password: 'alsoNope' }),
+      mkCompared('a', 'alice'),
+      mkCompared('b', 'alice'),
     ],
     submitFor('alice', 'shinyNew', { kind: 'change-form', oldPassword: 'mystery' }),
   );
@@ -393,6 +401,216 @@ async function main() {
     VaultEngine.listEntries().some((e) => e.title === 'Bulk A'),
     'bulk-added entries persist across save/open',
   );
+
+  // --- P0-5: password comparison stays inside offscreen/VaultEngine ---
+  const comparePrimary = VaultEngine.addEntry({
+    title: 'Compare Primary',
+    username: 'compare-user',
+    password: 'compare-old-one',
+    url: 'https://compare.example/login',
+    notes: '',
+  });
+  const compareSecondary = VaultEngine.addEntry({
+    title: 'Compare Secondary',
+    username: 'compare-user',
+    password: 'compare-old-two',
+    url: 'https://compare.example/account',
+    notes: '',
+  });
+  const compareGetTextBefore = getProtectedValueGetTextCount();
+  const unchanged = VaultEngine.preparePendingSuggestion({
+    url: 'https://compare.example/login',
+    username: 'compare-user',
+    password: 'compare-old-one',
+    kind: 'submit',
+  });
+  assert(unchanged === null, 'offscreen comparison silently ignores an unchanged password');
+
+  const preparedUpdate = VaultEngine.preparePendingSuggestion({
+    url: 'https://compare.example/settings',
+    username: 'compare-user',
+    password: 'compare-new',
+    oldPassword: 'compare-old-two',
+    kind: 'change-form',
+  });
+  assert(
+    preparedUpdate?.suggestion.action === 'update' &&
+      preparedUpdate.suggestion.entryId === compareSecondary.id,
+    'offscreen comparison selects the entry matching the old password',
+  );
+  assert(
+    preparedUpdate != null && !('newPassword' in preparedUpdate.suggestion),
+    'preparePending returns no password plaintext in suggestion metadata',
+  );
+  VaultEngine.clearPendingSecret();
+
+  const preparedSave = VaultEngine.preparePendingSuggestion({
+    url: 'https://compare.example/register',
+    username: 'new-compare-user',
+    password: 'compare-new-account',
+    kind: 'submit',
+  });
+  assert(
+    preparedSave?.suggestion.action === 'save' &&
+      preparedSave.suggestion.entryId === undefined,
+    'offscreen comparison proposes save for a new username',
+  );
+  VaultEngine.clearPendingSecret();
+  assert(
+    getProtectedValueGetTextCount() === compareGetTextBefore,
+    'offscreen password comparison never materializes stored passwords as JS strings',
+  );
+  assert(
+    comparePrimary.id !== compareSecondary.id,
+    'comparison fixtures use distinct entries',
+  );
+
+  // --- P0-5: pending secret token lifecycle ---
+  const token = VaultEngine.storePendingSecret('captured-pw-123');
+  assert(typeof token === 'string' && token.length > 0, 'storePendingSecret returns a non-empty token');
+  const savedEntry = VaultEngine.applyPendingSecret(token, {
+    action: 'save',
+    title: 'Pending Site',
+    username: 'pending-user',
+    url: 'https://pending.example.com/',
+  });
+  assert(savedEntry.hasPassword === true, 'applyPendingSecret(save) creates an entry with password');
+  assert(
+    VaultEngine.getEntry(savedEntry.id, true).password === 'captured-pw-123',
+    'pending secret password is stored correctly',
+  );
+  const retriedEntry = VaultEngine.applyPendingSecret(token, {
+    action: 'save',
+    title: 'ignored on retry',
+    username: 'ignored',
+    url: 'https://ignored.example/',
+  });
+  assert(retriedEntry.id === savedEntry.id, 'pending apply is idempotent until persistence commits');
+  VaultEngine.commitPendingSecret(token);
+  await rejects(
+    async () => {
+      VaultEngine.applyPendingSecret(token, {
+        action: 'save',
+        title: 'x',
+        username: 'y',
+        url: 'z',
+      });
+    },
+    'committed pending token cannot be reused',
+  );
+
+  const beforeAddRollback = VaultEngine.listEntries().length;
+  const rollbackToken = VaultEngine.storePendingSecret('rollback-add-pw');
+  const rollbackEntry = VaultEngine.applyPendingSecret(rollbackToken, {
+    action: 'save',
+    title: 'Must Roll Back',
+    username: 'rollback-user',
+    url: 'https://rollback.example/',
+  });
+  assert(
+    VaultEngine.listEntries().length === beforeAddRollback + 1,
+    'pending save is visible before rollback',
+  );
+  VaultEngine.rollbackPendingSecret(rollbackToken);
+  assert(
+    VaultEngine.listEntries().length === beforeAddRollback,
+    'rollbackPendingSecret removes an uncommitted new entry',
+  );
+  const reappliedEntry = VaultEngine.applyPendingSecret(rollbackToken, {
+    action: 'save',
+    title: 'Retry After Rollback',
+    username: 'rollback-user',
+    url: 'https://rollback.example/',
+  });
+  assert(
+    reappliedEntry.id !== rollbackEntry.id &&
+      VaultEngine.listEntries().length === beforeAddRollback + 1,
+    'rolled-back pending save can be retried exactly once',
+  );
+  VaultEngine.rollbackPendingSecret(rollbackToken);
+  VaultEngine.clearPendingSecret();
+
+  const originalPassword = VaultEngine.getEntry(savedEntry.id, true).password;
+  const updateToken = VaultEngine.storePendingSecret('rollback-update-pw');
+  VaultEngine.applyPendingSecret(updateToken, {
+    action: 'update',
+    entryId: savedEntry.id,
+  });
+  assert(
+    VaultEngine.getEntry(savedEntry.id, true).password === 'rollback-update-pw',
+    'pending update is visible before rollback',
+  );
+  VaultEngine.rollbackPendingSecret(updateToken);
+  assert(
+    VaultEngine.getEntry(savedEntry.id, true).password === originalPassword,
+    'rollbackPendingSecret restores the original password',
+  );
+  VaultEngine.applyPendingSecret(updateToken, {
+    action: 'update',
+    entryId: savedEntry.id,
+  });
+  VaultEngine.rollbackPendingSecret(updateToken);
+  VaultEngine.clearPendingSecret();
+  const rollbackSaved = await VaultEngine.save();
+  await VaultEngine.open(rollbackSaved, PW);
+  assert(
+    VaultEngine.getEntry(savedEntry.id, true).password === originalPassword,
+    'rolled-back update stays absent after save and reopen',
+  );
+
+  // clearPendingSecret rolls back an applied save and invalidates the token.
+  const beforeClear = VaultEngine.listEntries().length;
+  const token2 = VaultEngine.storePendingSecret('temp-pw');
+  VaultEngine.applyPendingSecret(token2, {
+    action: 'save',
+    title: 'Clear Must Roll Back',
+    username: 'clear-user',
+    url: 'https://clear.example/',
+  });
+  VaultEngine.clearPendingSecret();
+  assert(
+    VaultEngine.listEntries().length === beforeClear,
+    'clearPendingSecret rolls back an applied new entry',
+  );
+  await rejects(
+    async () => {
+      VaultEngine.applyPendingSecret(token2, {
+        action: 'save',
+        title: 'x',
+        username: 'y',
+        url: 'z',
+      });
+    },
+    'clearPendingSecret invalidates the token',
+  );
+  // lock() also rolls back and clears pending secret.
+  const beforeLock = VaultEngine.listEntries().length;
+  const token3 = VaultEngine.storePendingSecret('before-lock');
+  VaultEngine.applyPendingSecret(token3, {
+    action: 'save',
+    title: 'Lock Must Roll Back',
+    username: 'lock-user',
+    url: 'https://lock.example/',
+  });
+  VaultEngine.lock();
+  await rejects(
+    async () => {
+      VaultEngine.applyPendingSecret(token3, {
+        action: 'save',
+        title: 'x',
+        username: 'y',
+        url: 'z',
+      });
+    },
+    'lock() rolls back and clears pending secret',
+  );
+  await VaultEngine.open(rollbackSaved, PW);
+  assert(
+    VaultEngine.listEntries().length === beforeLock &&
+      !VaultEngine.listEntries().some((entry) => entry.title === 'Lock Must Roll Back'),
+    'lock rollback remains absent after reopen',
+  );
+  // --- end P0-5 ---
 
   // --- 解锁失败阶梯式锁定策略（参考小米手机，缩放适配浏览器）---
   assert(

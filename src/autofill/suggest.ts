@@ -19,13 +19,11 @@ export interface CredentialSnapshot {
 
 export type PendingAction = 'save' | 'update';
 
-export interface PendingSuggestion {
+export interface PendingSuggestionMetadata {
   action: PendingAction;
   url: string;
   origin: string;
   username: string;
-  /** New password the user just submitted; never logged or persisted to disk. */
-  newPassword: string;
   /** For 'update': the entry we will modify if the user accepts. */
   entryId?: string;
   entryTitle?: string;
@@ -34,31 +32,31 @@ export interface PendingSuggestion {
   createdAt: number;
 }
 
-/**
- * URL-matched entries enriched with the cleartext password for entries whose
- * username equals the snapshot username. Background fills passwords only for
- * the entries it actually needs to compare, so most entries stay opaque.
- */
-export interface EnrichedEntry extends EntrySummary {
-  password?: string;
+export interface PendingSuggestion extends PendingSuggestionMetadata {
+  /** New password the user just submitted; never logged or persisted to disk. */
+  newPassword: string;
+}
+
+export interface ComparedEntry {
+  entry: EntrySummary;
+  matchesNewPassword: boolean;
+  matchesOldPassword: boolean;
 }
 
 /**
- * Decide whether the snapshot should produce a save prompt, an update prompt,
- * or be silently ignored.
- *
- * Inputs:
- * - `urlMatched`: entries already ranked by `matchEntriesForUrl` for the page.
- * - `snapshot`: what the user just submitted.
+ * Decide whether pre-compared entries should produce a save/update prompt.
+ * Stored password values stay outside this pure decision boundary.
  */
-export function decideSuggestion(
-  urlMatched: EnrichedEntry[],
+export function decideSuggestionFromComparisons(
+  urlMatched: ComparedEntry[],
   snapshot: CredentialSnapshot,
 ): PendingSuggestion | null {
   if (!snapshot.password) return null;
 
   const usernameKey = normalizeUsername(snapshot.username);
-  const sameUser = urlMatched.filter((e) => normalizeUsername(e.username) === usernameKey);
+  const sameUser = urlMatched.filter(
+    ({ entry }) => normalizeUsername(entry.username) === usernameKey,
+  );
 
   // 1. Nothing on this site uses this username -> propose save.
   if (sameUser.length === 0) {
@@ -73,22 +71,19 @@ export function decideSuggestion(
   }
 
   // 2. An existing entry already stores this exact password -> silent.
-  const alreadySaved = sameUser.some(
-    (e) => typeof e.password === 'string' && e.password === snapshot.password,
-  );
+  const alreadySaved = sameUser.some(({ matchesNewPassword }) => matchesNewPassword);
   if (alreadySaved) return null;
 
   // 3. Password-change form: prefer the entry whose stored password matches
   // the "current password" the user typed.
-  let target: EnrichedEntry | undefined;
+  let target: ComparedEntry | undefined;
   if (snapshot.kind === 'change-form' && snapshot.oldPassword) {
-    target = sameUser.find(
-      (e) => typeof e.password === 'string' && e.password === snapshot.oldPassword,
-    );
+    target = sameUser.find(({ matchesOldPassword }) => matchesOldPassword);
   }
 
   // 4. Otherwise fall back to the best-ranked same-username match.
   if (!target) target = sameUser[0]!;
+  const targetEntry = target.entry;
 
   return {
     action: 'update',
@@ -96,15 +91,33 @@ export function decideSuggestion(
     origin: displayOrigin(snapshot.url),
     username: snapshot.username,
     newPassword: snapshot.password,
-    entryId: target.id,
-    entryTitle: target.title,
-    alternateEntryIds: sameUser.filter((e) => e.id !== target!.id).map((e) => e.id),
+    entryId: targetEntry.id,
+    entryTitle: targetEntry.title,
+    alternateEntryIds: sameUser
+      .map(({ entry }) => entry)
+      .filter((entry) => entry.id !== targetEntry.id)
+      .map((entry) => entry.id),
     createdAt: Date.now(),
   };
 }
 
-function normalizeUsername(value: string): string {
+export function normalizeUsername(value: string): string {
   return value.trim().toLowerCase();
+}
+
+export function toPendingSuggestionMetadata(
+  suggestion: PendingSuggestionMetadata,
+): PendingSuggestionMetadata {
+  return {
+    action: suggestion.action,
+    url: suggestion.url,
+    origin: suggestion.origin,
+    username: suggestion.username,
+    entryId: suggestion.entryId,
+    entryTitle: suggestion.entryTitle,
+    alternateEntryIds: suggestion.alternateEntryIds,
+    createdAt: suggestion.createdAt,
+  };
 }
 
 function displayOrigin(url: string): string {

@@ -9,9 +9,19 @@ import type {
   VaultMeta,
 } from '@/src/vault/types';
 import type { OneDriveConfig, OneDriveFileStat, OneDriveListItem } from '@/src/onedrive/graph';
-import type { CredentialSnapshot, PendingSuggestion } from '@/src/autofill/suggest';
+import type { CredentialSnapshot, PendingSuggestionMetadata } from '@/src/autofill/suggest';
 
-export type { CredentialSnapshot, PendingSuggestion } from '@/src/autofill/suggest';
+export type { CredentialSnapshot } from '@/src/autofill/suggest';
+
+/**
+ * Pending suggestion DTO without the password. Returned to content script and
+ * popup; the actual secret lives in the offscreen document and its opaque
+ * token remains private to the background. P0-5: neither value may appear here.
+ */
+export type PendingSuggestionPublic = PendingSuggestionMetadata & {
+  /** Non-secret correlation ID used to reject stale cross-tab prompts. */
+  id: string;
+};
 
 /**
  * Backup credential as sent over chrome.runtime messaging. Binary key file
@@ -70,6 +80,7 @@ export type BgRequest =
   | { type: 'vault.lock' }
   | { type: 'vault.forgetKeyFile' }
   | { type: 'vault.listEntries' }
+  | { type: 'vault.pickerEntries'; url: string }
   | { type: 'vault.listGroups' }
   | { type: 'vault.getEntry'; id: string; reveal: boolean }
   | { type: 'vault.add'; input: NewEntryInput }
@@ -81,8 +92,8 @@ export type BgRequest =
   | { type: 'vault.setKdf'; profile: Exclude<KdfProfile, 'custom'> }
   | { type: 'vault.importCsv'; csv: string }
   | { type: 'vault.capture'; snapshot: CredentialSnapshot }
-  | { type: 'vault.applyPending'; entryId?: string }
-  | { type: 'vault.dismissPending' }
+  | { type: 'vault.applyPending'; pendingId: string; entryId?: string }
+  | { type: 'vault.dismissPending'; pendingId: string }
   | { type: 'backup.exportLocal'; credential: BackupCredentialInput }
   | { type: 'backup.exportToOneDrive'; credential: BackupCredentialInput; path?: string }
   | { type: 'backup.importLocal'; data: string; credential: BackupCredentialInput }
@@ -102,7 +113,7 @@ export interface VaultStatus {
   helloEnrolled: boolean;
   rememberedKeyFile: boolean;
   meta: VaultMeta | null;
-  pending: PendingSuggestion | null;
+  pending: PendingSuggestionPublic | null;
   /** 当前累计解锁失败次数（解锁成功时重置为 0）。 */
   failedAttempts: number;
   /** 锁定截止时间戳（Date.now() ms），null 表示未锁定。 */
@@ -157,6 +168,7 @@ export interface BgResultMap {
   'vault.lock': VaultStatus;
   'vault.forgetKeyFile': VaultStatus;
   'vault.listEntries': EntrySummary[];
+  'vault.pickerEntries': EntrySummary[];
   'vault.listGroups': GroupSummary[];
   'vault.getEntry': EntryDetail;
   'vault.add': EntrySummary;
@@ -167,9 +179,9 @@ export interface BgResultMap {
   'vault.kdfInfo': KdfInfo;
   'vault.setKdf': KdfInfo;
   'vault.importCsv': ImportResult;
-  // Returns the resulting suggestion so the capturing tab can render an
-  // in-page save/update prompt (null = nothing to suggest).
-  'vault.capture': PendingSuggestion | null;
+  // Returns the resulting suggestion (without password) so the capturing tab
+  // can render an in-page save/update prompt (null = nothing to suggest).
+  'vault.capture': PendingSuggestionPublic | null;
   'vault.applyPending': VaultStatus;
   'vault.dismissPending': VaultStatus;
   'backup.exportLocal': BackupExportLocalResult;
@@ -206,7 +218,10 @@ export type OffscreenOp =
   | { op: 'meta' }
   | { op: 'listGroups' }
   | { op: 'listEntries' }
+  | { op: 'matchEntries'; url: string }
+  | { op: 'pickerEntries'; url: string }
   | { op: 'getEntry'; id: string; reveal: boolean }
+  | { op: 'preparePending'; snapshot: CredentialSnapshot }
   | { op: 'add'; input: NewEntryInput }
   | { op: 'update'; input: UpdateEntryInput }
   | { op: 'delete'; id: string }
@@ -214,7 +229,19 @@ export type OffscreenOp =
   | { op: 'kdfInfo' }
   | { op: 'setKdf'; profile: Exclude<KdfProfile, 'custom'> }
   | { op: 'importEntries'; inputs: NewEntryInput[] }
-  | { op: 'mergeRemote'; data: string; password: string | null; keyFile?: string };
+  | { op: 'mergeRemote'; data: string; password: string | null; keyFile?: string }
+  | {
+      op: 'applyPending';
+      token: string;
+      action: 'save';
+      title: string;
+      username: string;
+      url: string;
+    }
+  | { op: 'applyPending'; token: string; action: 'update'; entryId: string }
+  | { op: 'rollbackPending'; token: string }
+  | { op: 'commitPending'; token: string }
+  | { op: 'clearPending' };
 
 export interface OffscreenEnvelope {
   target: 'offscreen';

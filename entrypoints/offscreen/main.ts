@@ -27,8 +27,14 @@ async function handle(op: OffscreenOp): Promise<unknown> {
       return VaultEngine.listGroups();
     case 'listEntries':
       return VaultEngine.listEntries();
+    case 'matchEntries':
+      return VaultEngine.matchEntries(op.url);
+    case 'pickerEntries':
+      return VaultEngine.pickerEntries(op.url);
     case 'getEntry':
       return VaultEngine.getEntry(op.id, op.reveal);
+    case 'preparePending':
+      return VaultEngine.preparePendingSuggestion(op.snapshot);
     case 'add':
       return VaultEngine.addEntry(op.input);
     case 'update':
@@ -52,12 +58,40 @@ async function handle(op: OffscreenOp): Promise<unknown> {
           op.keyFile ? (base64ToBytes(op.keyFile).buffer as ArrayBuffer) : undefined,
         ),
       );
+    case 'applyPending':
+      return op.action === 'save'
+        ? VaultEngine.applyPendingSecret(op.token, {
+            action: 'save',
+            title: op.title,
+            username: op.username,
+            url: op.url,
+          })
+        : VaultEngine.applyPendingSecret(op.token, {
+            action: 'update',
+            entryId: op.entryId,
+          });
+    case 'commitPending':
+      VaultEngine.commitPendingSecret(op.token);
+      return null;
+    case 'rollbackPending':
+      VaultEngine.rollbackPendingSecret(op.token);
+      return null;
+    case 'clearPending':
+      VaultEngine.clearPendingSecret();
+      return null;
   }
 }
 
 chrome.runtime.onMessage.addListener(
-  (msg: OffscreenEnvelope, _sender, sendResponse: (r: unknown) => void) => {
-    if (!msg || msg.target !== 'offscreen') return undefined;
+  (msg: OffscreenEnvelope, sender, sendResponse: (r: unknown) => void) => {
+    if (
+      !msg ||
+      msg.target !== 'offscreen' ||
+      sender.id !== chrome.runtime.id ||
+      sender.tab != null
+    ) {
+      return undefined;
+    }
     handle(msg.payload).then(
       (value) => sendResponse({ ok: true, value }),
       (err: unknown) => sendResponse({ ok: false, error: errorMessage(err) }),
