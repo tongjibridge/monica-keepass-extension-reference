@@ -1,6 +1,22 @@
-import { Consts, Credentials, Int64, Kdbx, ProtectedValue, VarDictionary } from 'kdbxweb';
-import type { KdbxEntry, KdbxEntryField, KdbxGroup } from 'kdbxweb';
+import {
+  Consts,
+  Credentials,
+  Int64,
+  Kdbx,
+  KdbxEntry,
+  ProtectedValue,
+  VarDictionary,
+} from 'kdbxweb';
+import type { KdbxEntryField, KdbxGroup } from 'kdbxweb';
 import { clearArgon2Cache, installArgon2 } from '@/src/crypto/argon2';
+import { matchEntriesForUrl } from '@/src/autofill/match';
+import {
+  decideSuggestionFromComparisons,
+  normalizeUsername,
+  toPendingSuggestionMetadata,
+  type CredentialSnapshot,
+  type PendingSuggestionMetadata,
+} from '@/src/autofill/suggest';
 import type {
   EntryDetail,
   EntrySummary,
@@ -17,6 +33,31 @@ import type {
 // outlive an explicit lock or idle timeout.
 
 let db: Kdbx | null = null;
+
+// Pending secret: a freshly captured password held as a ProtectedValue in the
+// offscreen document, referenced by a random opaque token. The token is stored
+// in session storage alongside non-secret metadata; the password never leaves
+// the offscreen context. Cleared after a persisted apply, dismiss, lock, or TTL
+// expiry.
+type PendingApply =
+  | { action: 'save'; title: string; username: string; url: string }
+  | { action: 'update'; entryId: string };
+
+type PendingRollback =
+  | { kind: 'add'; entry: KdbxEntry; parentGroup: KdbxGroup }
+  | {
+      kind: 'update';
+      entry: KdbxEntry;
+      snapshot: KdbxEntry;
+      historyLength: number;
+      editState: KdbxEntry['_editState'];
+    };
+
+let pendingSecret: {
+  token: string;
+  value: ProtectedValue;
+  applied?: { summary: EntrySummary; rollback: PendingRollback };
+} | null = null;
 
 // Argon2 cost presets (id variant). Memory in KiB. These balance browser KDF
 // latency against brute-force resistance; the file is also protected by the OS
@@ -119,6 +160,25 @@ function hasFieldValue(value: KdbxEntryField | undefined): boolean {
   return value.length > 0;
 }
 
+function fieldMatchesBytes(
+  value: KdbxEntryField | undefined,
+  expectedText: string,
+  expectedBytes: Uint8Array,
+): boolean {
+  if (!(value instanceof ProtectedValue)) return (value ?? '') === expectedText;
+  const actual = value.getBinary();
+  try {
+    let difference = actual.length ^ expectedBytes.length;
+    const length = Math.max(actual.length, expectedBytes.length);
+    for (let index = 0; index < length; index++) {
+      difference |= (actual[index] ?? 0) ^ (expectedBytes[index] ?? 0);
+    }
+    return difference === 0;
+  } finally {
+    actual.fill(0);
+  }
+}
+
 function isRecycleBin(group: KdbxGroup): boolean {
   const binUuid = db?.meta.recycleBinUuid;
   return binUuid != null && !binUuid.empty && group.uuid.equals(binUuid);
@@ -150,6 +210,67 @@ function summarize(entry: KdbxEntry): EntrySummary {
   };
 }
 
+function entryDetail(entry: KdbxEntry, reveal: boolean): EntryDetail {
+  const detail: EntryDetail = {
+    ...summarize(entry),
+    notes: fieldText(entry.fields.get('Notes')),
+  };
+  if (reveal) {
+    detail.password = fieldText(entry.fields.get('Password'));
+    const otp = entry.fields.get('otp');
+    if (otp != null) detail.otp = fieldText(otp);
+  }
+  return detail;
+}
+
+function cloneEditState(
+  state: KdbxEntry['_editState'],
+): KdbxEntry['_editState'] {
+  return state
+    ? { added: [...state.added], deleted: [...state.deleted] }
+    : undefined;
+}
+
+function zeroProtectedValue(value: ProtectedValue): void {
+  value.value.fill(0);
+  value.salt.fill(0);
+}
+
+function zeroEntrySecrets(entry: KdbxEntry, includeHistory = false): void {
+  for (const value of entry.fields.values()) {
+    if (value instanceof ProtectedValue) zeroProtectedValue(value);
+  }
+  for (const value of entry.binaries.values()) {
+    if (value instanceof ProtectedValue) zeroProtectedValue(value);
+  }
+  if (includeHistory) {
+    for (const historyEntry of entry.history) zeroEntrySecrets(historyEntry, true);
+  }
+}
+
+function rollbackAppliedPending(rollback: PendingRollback): void {
+  if (rollback.kind === 'add') {
+    const index = rollback.parentGroup.entries.indexOf(rollback.entry);
+    if (index >= 0) rollback.parentGroup.entries.splice(index, 1);
+    zeroEntrySecrets(rollback.entry, true);
+    rollback.entry.parentGroup = undefined;
+    return;
+  }
+
+  zeroEntrySecrets(rollback.entry);
+  for (const historyEntry of rollback.entry.history.slice(rollback.historyLength)) {
+    zeroEntrySecrets(historyEntry, true);
+  }
+  rollback.entry.history.splice(rollback.historyLength);
+  rollback.entry.copyFrom(rollback.snapshot);
+  rollback.entry._editState = cloneEditState(rollback.editState);
+  zeroEntrySecrets(rollback.snapshot, true);
+}
+
+function releaseRollbackSnapshot(rollback: PendingRollback): void {
+  if (rollback.kind === 'update') zeroEntrySecrets(rollback.snapshot, true);
+}
+
 function findEntry(id: string): KdbxEntry {
   const root = requireDb().getDefaultGroup();
   for (const entry of walkEntries(root)) {
@@ -176,6 +297,7 @@ export const VaultEngine = {
     password: string | null,
     keyFile?: ArrayBuffer,
   ): Promise<VaultMeta> {
+    VaultEngine.clearPendingSecret();
     installArgon2();
     clearArgon2Cache();
     db = await Kdbx.load(data, credentials(password, keyFile));
@@ -184,6 +306,7 @@ export const VaultEngine = {
   },
 
   async createNew(name: string, password: string): Promise<ArrayBuffer> {
+    VaultEngine.clearPendingSecret();
     installArgon2();
     clearArgon2Cache();
     db = Kdbx.create(credentials(password), name);
@@ -195,6 +318,7 @@ export const VaultEngine = {
   },
 
   lock(): void {
+    VaultEngine.clearPendingSecret();
     db = null;
     clearArgon2Cache();
   },
@@ -258,18 +382,64 @@ export const VaultEngine = {
     return [...walkEntries(root)].map(summarize);
   },
 
-  getEntry(id: string, reveal: boolean): EntryDetail {
-    const entry = findEntry(id);
-    const detail: EntryDetail = {
-      ...summarize(entry),
-      notes: fieldText(entry.fields.get('Notes')),
-    };
-    if (reveal) {
-      detail.password = fieldText(entry.fields.get('Password'));
-      const otp = entry.fields.get('otp');
-      if (otp != null) detail.otp = fieldText(otp);
+  matchEntries(url: string): EntrySummary[] {
+    return matchEntriesForUrl(VaultEngine.listEntries(), url);
+  },
+
+  pickerEntries(url: string): EntrySummary[] {
+    const entries = VaultEngine.listEntries();
+    const ordered = new Map<string, EntrySummary>();
+    for (const entry of matchEntriesForUrl(entries, url)) ordered.set(entry.id, entry);
+    for (const entry of entries) ordered.set(entry.id, entry);
+    return [...ordered.values()];
+  },
+
+  preparePendingSuggestion(
+    snapshot: CredentialSnapshot,
+  ): { token: string; suggestion: PendingSuggestionMetadata } | null {
+    if (!snapshot.password) return null;
+    const entries = [...walkEntries(requireDb().getDefaultGroup())];
+    const entryById = new Map(entries.map((entry) => [entry.uuid.id, entry]));
+    const urlMatched = matchEntriesForUrl(entries.map(summarize), snapshot.url);
+    const usernameKey = normalizeUsername(snapshot.username);
+
+    const encoder = new TextEncoder();
+    const newPasswordBytes = encoder.encode(snapshot.password);
+    const oldPasswordBytes = snapshot.oldPassword
+      ? encoder.encode(snapshot.oldPassword)
+      : null;
+    try {
+      const suggestion = decideSuggestionFromComparisons(
+        urlMatched.map((summary) => {
+          const entry =
+            normalizeUsername(summary.username) === usernameKey
+              ? entryById.get(summary.id)
+              : undefined;
+          const password = entry?.fields.get('Password');
+          return {
+            entry: summary,
+            matchesNewPassword:
+              entry != null &&
+              fieldMatchesBytes(password, snapshot.password, newPasswordBytes),
+            matchesOldPassword:
+              entry != null &&
+              oldPasswordBytes != null &&
+              fieldMatchesBytes(password, snapshot.oldPassword!, oldPasswordBytes),
+          };
+        }),
+        snapshot,
+      );
+      if (!suggestion) return null;
+      const token = VaultEngine.storePendingSecret(suggestion.newPassword);
+      return { token, suggestion: toPendingSuggestionMetadata(suggestion) };
+    } finally {
+      newPasswordBytes.fill(0);
+      oldPasswordBytes?.fill(0);
     }
-    return detail;
+  },
+
+  getEntry(id: string, reveal: boolean): EntryDetail {
+    return entryDetail(findEntry(id), reveal);
   },
 
   addEntry(input: NewEntryInput): EntrySummary {
@@ -360,5 +530,87 @@ export const VaultEngine = {
     const remote = await Kdbx.load(data, credentials(password, keyFile));
     local.merge(remote);
     return local.save();
+  },
+
+  /** Store a captured password as a ProtectedValue and return an opaque token. */
+  storePendingSecret(password: string): string {
+    VaultEngine.clearPendingSecret();
+    const token = crypto.randomUUID();
+    pendingSecret = { token, value: ProtectedValue.fromString(password) };
+    return token;
+  },
+
+  /** Apply the pending secret: decrypt internally and add/update the entry. */
+  applyPendingSecret(
+    token: string,
+    input: PendingApply,
+  ): EntrySummary {
+    if (!pendingSecret || pendingSecret.token !== token) {
+      throw new Error('Pending credential expired or invalid');
+    }
+    if (pendingSecret.applied) return pendingSecret.applied.summary;
+    const password = pendingSecret.value.getText();
+    let summary: EntrySummary;
+    let rollback: PendingRollback;
+    if (input.action === 'save') {
+      summary = VaultEngine.addEntry({
+        title: input.title,
+        username: input.username,
+        password,
+        url: input.url,
+        notes: '',
+      });
+      const entry = findEntry(summary.id);
+      if (!entry.parentGroup) throw new Error('Pending entry has no parent group');
+      rollback = { kind: 'add', entry, parentGroup: entry.parentGroup };
+    } else {
+      const entry = findEntry(input.entryId);
+      const snapshot = new KdbxEntry();
+      snapshot.copyFrom(entry);
+      rollback = {
+        kind: 'update',
+        entry,
+        snapshot,
+        historyLength: entry.history.length,
+        editState: cloneEditState(entry._editState),
+      };
+      summary = VaultEngine.updateEntry({ id: input.entryId, password });
+    }
+    pendingSecret.applied = { summary, rollback };
+    return summary;
+  },
+
+  /** Roll back an uncommitted apply but keep the token/secret available to retry. */
+  rollbackPendingSecret(token: string): void {
+    if (!pendingSecret || pendingSecret.token !== token) {
+      throw new Error('Pending credential expired or invalid');
+    }
+    if (pendingSecret.applied) {
+      rollbackAppliedPending(pendingSecret.applied.rollback);
+      pendingSecret.applied = undefined;
+    }
+  },
+
+  /** Acknowledge successful persistence, then erase the pending secret. */
+  commitPendingSecret(token: string): void {
+    if (!pendingSecret || pendingSecret.token !== token) {
+      throw new Error('Pending credential expired or invalid');
+    }
+    if (pendingSecret.applied) {
+      releaseRollbackSnapshot(pendingSecret.applied.rollback);
+    }
+    zeroProtectedValue(pendingSecret.value);
+    pendingSecret = null;
+  },
+
+  /** Roll back any uncommitted apply, then zero and drop the pending secret. */
+  clearPendingSecret(): void {
+    if (pendingSecret) {
+      if (pendingSecret.applied) {
+        rollbackAppliedPending(pendingSecret.applied.rollback);
+      }
+      zeroProtectedValue(pendingSecret.value);
+      pendingSecret = null;
+    }
   },
 };

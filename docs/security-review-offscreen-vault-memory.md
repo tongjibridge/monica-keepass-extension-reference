@@ -443,3 +443,41 @@ P0-4 不能先于 P0-3独立上线，否则自动锁定可能在保存或同步�
 > 消除无必要的全库明文生成和明显长期副本；在锁定时尽最大可能覆盖可变缓冲区并销毁 Offscreen 执行环境；显著缩短秘密在浏览器内的驻留时间。
 
 如果目标是抵御浏览器 renderer 或扩展进程失陷后的全库提取，应进入架构级改造：由 Native Messaging 独立桌面进程持有数据库和主凭据，扩展只获取当前操作所需的单条字段。
+
+## 9. 2026-07-26 全库 `simplify` 审查记录
+
+### 9.1 审查范围
+
+本轮静态审查覆盖扩展入口、消息协议、Vault 引擎、自动填充、备份与 OneDrive 同步、测试脚本及包管理配置。审查按复用性、代码质量和执行效率三个方向并行进行，并对修改后的完整差异再次做回归复审。
+
+### 9.2 本轮已处理
+
+| 项目 | 修改 | 影响 |
+|---|---|---|
+| Pending token 暴露 | 对外 DTO 只返回非敏感元数据；token 仅保存在 `chrome.storage.session` 与后台内部 | 内容脚本和页面上下文不再获得可直接调用 offscreen 的秘密引用 |
+| 跨标签页 Pending 竞态 | capture、apply、dismiss、TTL 清理和锁定统一进入串行状态队列，并要求非敏感关联 ID 匹配 | 避免 token/密码对应关系串线，旧提示也不能应用或清除新凭据 |
+| 持久化失败后的重复写入 | Pending apply 使用最小事务日志执行“应用—持久化—提交清零”；apply 或 `persist()` 失败时恢复条目、历史和编辑状态 | 失败操作不会残留在内存数据库或被后续保存意外写入，Pending token 仍可安全重试 |
+| Vault 切换遗漏清理 | 导入、新建、锁定、OneDrive 拉取和备份恢复统一清理 Pending | 减少旧 Vault 凭据被带入新 Vault 生命周期的风险 |
+| Offscreen 消息来源 | 拒绝 sender ID 不匹配及带 `sender.tab` 的直接调用 | 阻止 content script 直接调用 Vault offscreen 路由 |
+| Offscreen 创建竞态 | 使用共享 in-flight Promise 合并并发创建 | 避免多请求同时创建 offscreen document |
+| 捕获密码比较边界 | 新增 offscreen 内部 `preparePending`；候选密码使用可清零字节缓冲区比较，删除批量 `getEntries(reveal)` 协议 | 存储密码不再作为 JS 字符串或消息数组进入 background，临时比较缓冲区在 `finally` 中覆盖 |
+| 账号选择器重复扫描 | 后台一次列举并排序，内容脚本改用 `vault.pickerEntries` | 打开选择器从两次全库枚举降为一次 |
+| 重复哈希 | OneDrive 同步复用已计算的本地 SHA-256 | 部分同步分支不再对同一 KDBX 重复哈希 |
+| 配置与重复逻辑 | 删除无效 `pnpm-workspace.yaml`；共享 Pending 元数据映射和用户名规范化 | 消除占位配置，并减少安全字段映射漂移 |
+
+### 9.3 验证结果
+
+- `tsc --noEmit`：通过。
+- Vault/安全 harness：87 项检查全部通过，覆盖 offscreen 密码比较不调用 `getText()`、非敏感返回值、Pending 幂等重试、提交后失效、新增/更新回滚、清理回滚和锁定回滚。
+- WXT Chrome MV3 生产构建：通过。
+- 构建产物 smoke：全部通过。
+- `git diff --check`：通过。
+
+### 9.4 仍需后续处理
+
+1. **完整 Vault 明文驻留仍未消除。** 本轮优化 Pending 密码和访问路径，但 `kdbxweb` 的完整数据库对象仍位于浏览器 offscreen 进程内；这是原报告的核心架构风险。
+2. **Vault 全局写操作尚未统一串行化。** add、update、delete、CSV 导入、KDF 修改、merge 和同步仍可能并发修改同一数据库；建议后续引入单一 mutation queue 和 revision/dirty 标记。
+3. **Offscreen 鉴权不是密码学边界。** sender 校验能阻止 content script 直连，但扩展自身页面仍处于同一扩展信任域；更强方案需要私有 Port、一次性 nonce 或 Native Messaging。
+4. **JS 字符串无法可靠擦除。** `ProtectedValue.getText()`、表单值和消息序列化仍会产生不可变字符串副本；只能缩短生命周期，不能保证物理清零。
+5. **OneDrive 无变更同步仍可能完整序列化 KDBX。** 建议用 dirty revision 判断是否需要 `save()`，并减少大型 Base64 字符串的重复分配。
+6. **通用工具仍有低优先级重复。** Base64、随机字节和错误格式化存在多份实现，可在不改变安全边界的独立重构中合并。

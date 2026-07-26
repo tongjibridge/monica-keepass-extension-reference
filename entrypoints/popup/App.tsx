@@ -157,14 +157,21 @@ export function App() {
             busy={busy}
             onApply={(entryId) =>
               run(async () => {
-                await callBackground({ type: 'vault.applyPending', ...(entryId ? { entryId } : {}) });
+                await callBackground({
+                  type: 'vault.applyPending',
+                  pendingId: status.pending!.id,
+                  ...(entryId ? { entryId } : {}),
+                });
                 await refreshStatus();
                 if (view === 'list') await loadEntries();
               })
             }
             onDismiss={() =>
               run(async () => {
-                await callBackground({ type: 'vault.dismissPending' });
+                await callBackground({
+                  type: 'vault.dismissPending',
+                  pendingId: status.pending!.id,
+                });
                 await refreshStatus();
               })
             }
